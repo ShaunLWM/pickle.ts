@@ -12,6 +12,9 @@ export type ClientMessages = {
   snowball: { x: number; y: number }
   buddy_request: { id: number }
   buddy_accept: { id: number }
+  buddy_reject: { id: number }
+  buddy_request_seen: { id: number }
+  get_buddy: { id: number; type: "buddies" | "buddyRequests" }
   remove_buddy: { id: number }
   get_player: { id: number }
   add_ignore: { id: number }
@@ -94,6 +97,26 @@ export type ServerMessages = {
   }
   get_player: {
     user: RoomUser
+  }
+  buddy_request: {
+    id: number
+  }
+  buddy_accept: {
+    id: number
+    username: string
+    requester: boolean
+    online: boolean
+  }
+  buddy_reject: {
+    id: number
+  }
+  buddy_request_seen: {
+    id: number
+  }
+  get_buddy: {
+    id: number
+    penguin: Record<string, unknown>
+    type: "buddies" | "buddyRequests"
   }
   update_player: {
     id: number

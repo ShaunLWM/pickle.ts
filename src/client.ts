@@ -172,6 +172,9 @@ export class Client extends EventEmitter {
   equipPhoto(item: number): void { this.adapter.equipPhoto(item) }
   buddyRequest(id: number): void { this.adapter.buddyRequest(id) }
   buddyAccept(id: number): void { this.adapter.buddyAccept(id) }
+  buddyReject(id: number): void { this.adapter.buddyReject(id) }
+  buddyRequestSeen(id: number): void { this.adapter.buddyRequestSeen(id) }
+  getBuddy(id: number, type: "buddies" | "buddyRequests"): void { this.adapter.getBuddy(id, type) }
   removeBuddy(id: number): void { this.adapter.removeBuddy(id) }
   addIgnore(id: number): void { this.adapter.addIgnore(id) }
   removeIgnore(id: number): void { this.adapter.removeIgnore(id) }

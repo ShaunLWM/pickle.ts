@@ -90,6 +90,18 @@ export abstract class BaseAdapter {
     this.send("buddy_accept", { id })
   }
 
+  buddyReject(id: number): void {
+    this.send("buddy_reject", { id })
+  }
+
+  buddyRequestSeen(id: number): void {
+    this.send("buddy_request_seen", { id })
+  }
+
+  getBuddy(id: number, type: "buddies" | "buddyRequests"): void {
+    this.send("get_buddy", { id, type })
+  }
+
   removeBuddy(id: number): void {
     this.send("remove_buddy", { id })
   }

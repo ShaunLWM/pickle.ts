@@ -17,8 +17,12 @@ export type ClientMessages = {
   get_buddy: { id: number; type: "buddies" | "buddyRequests" }
   remove_buddy: { id: number }
   get_player: { id: number }
-  add_ignore: { id: number }
-  remove_ignore: { id: number }
+  ignore_add: { id: number }
+  ignore_remove: { id: number }
+  send_postcard: { userId: number; cardId: string }
+  get_stamps: { userId: number }
+  get_igloo_open: { igloo: number }
+  join_igloo: { igloo: number; x?: number; y?: number }
   update_color: { item: number }
   update_head: { item: number }
   update_face: { item: number }
@@ -117,6 +121,41 @@ export type ServerMessages = {
     id: number
     penguin: Record<string, unknown>
     type: "buddies" | "buddyRequests"
+  }
+  send_postcard: {
+    coins: number
+  }
+  stamps_result: {
+    stamps: number[]
+    inventory: number[]
+    coverOnly: number[]
+    unseen: number[]
+    username: string
+    playerColor: number
+    stampbook: {
+      userId: number
+      colour: number
+      clasp: number
+      highlight: number
+      pattern: number
+    }
+    coverStamps: {
+      stampId: number
+      itemId: number
+      x: number
+      y: number
+      rotation: number
+    }[]
+  }
+  ignore_add: {
+    id: number
+    username: string
+  }
+  ignore_remove: {
+    id: number
+  }
+  get_igloo_open: {
+    open: boolean
   }
   update_player: {
     id: number

@@ -107,11 +107,11 @@ export abstract class BaseAdapter {
   }
 
   addIgnore(id: number): void {
-    this.send("add_ignore", { id })
+    this.send("ignore_add", { id })
   }
 
   removeIgnore(id: number): void {
-    this.send("remove_ignore", { id })
+    this.send("ignore_remove", { id })
   }
 
   getPlayer(id: number): void {
@@ -124,5 +124,21 @@ export abstract class BaseAdapter {
 
   getMascots(): void {
     this.send("get_mascots", {})
+  }
+
+  sendPostcard(userId: number, cardId: string): void {
+    this.send("send_postcard", { userId, cardId })
+  }
+
+  getStamps(userId: number): void {
+    this.send("get_stamps", { userId })
+  }
+
+  getIglooOpen(igloo: number): void {
+    this.send("get_igloo_open", { igloo })
+  }
+
+  joinIgloo(igloo: number, x?: number, y?: number): void {
+    this.send("join_igloo", { igloo, x: x ?? 0, y: y ?? 0 })
   }
 }

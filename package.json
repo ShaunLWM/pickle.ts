@@ -1,6 +1,6 @@
 {
-  "name": "pickle.ts",
-  "version": "0.1.0",
+  "name": "@shaunlwm/pickle.ts",
+  "version": "0.0.1",
   "description": "Club Penguin Private Server client library",
   "type": "module",
   "main": "./dist/index.js",
@@ -12,8 +12,8 @@
     }
   },
   "scripts": {
-    "build": "tsc",
-    "dev": "tsc --watch",
+    "build": "tsup",
+    "dev": "tsup --watch",
     "typecheck": "tsc --noEmit",
     "prepare": "npm run build",
     "prepublishOnly": "npm run build"
@@ -24,6 +24,7 @@
   },
   "devDependencies": {
     "@types/node": "^22.0.0",
+    "tsup": "^8.5.1",
     "typescript": "^5.7.2"
   },
   "files": [

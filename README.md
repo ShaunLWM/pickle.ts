@@ -7,12 +7,7 @@ Built with TypeScript, Socket.IO, and msgpack. Supports multiple CPPS backends t
 ## Install
 
 ```bash
-# from git
-npm install github:ShaunLWM/pickle.ts
-
-# or clone and link locally
-git clone git@github.com:ShaunLWM/pickle.ts.git
-cd pickle.ts && npm install && npm run build
+npm install @shaunlwm/pickle.ts
 ```
 
 ## Quick Start

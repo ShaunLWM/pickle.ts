@@ -26,6 +26,7 @@ export class Client extends EventEmitter {
   player: PlayerData | null = null
   room: number | null = null
   users: Map<number, RoomUser> = new Map()
+  connected = false
 
   private adapter: BaseAdapter
   private loginResult: LoginResult | null = null
@@ -65,6 +66,17 @@ export class Client extends EventEmitter {
 
     const socket = await this.adapter.connect(serverName, this.loginResult, connectOptions)
 
+    socket.on("message", (msg: unknown) => {
+      if (!isMessagePayload(msg)) return
+      this.handleMessage(msg)
+    })
+
+    socket.on("disconnect", () => {
+      this.log?.("[disconnect] connection lost")
+      this.cleanup()
+      this.emit("disconnect")
+    })
+
     await new Promise<void>((resolve, reject) => {
       const timeout = setTimeout(() => {
         reject(new Error("Waiting for load_player timed out"))
@@ -76,14 +88,13 @@ export class Client extends EventEmitter {
       const checkReady = (): void => {
         if (playerLoaded && roomJoined) {
           clearTimeout(timeout)
+          this.connected = true
           resolve()
         }
       }
 
-      socket.on("message", (msg: unknown) => {
+      const onMessage = (msg: unknown): void => {
         if (!isMessagePayload(msg)) return
-        this.handleMessage(msg)
-
         switch (msg.action) {
           case "load_player":
             playerLoaded = true
@@ -93,16 +104,28 @@ export class Client extends EventEmitter {
             roomJoined = true
             checkReady()
             break
+          case "kick":
+            clearTimeout(timeout)
+            socket.off("message", onMessage)
+            reject(new Error(`Kicked: ${(msg.args as { reason?: string }).reason ?? "unknown"}`))
+            break
+          case "close_with_error":
+            clearTimeout(timeout)
+            socket.off("message", onMessage)
+            reject(new Error(`Kicked: ${(msg.args as { error?: string }).error ?? "unknown"}`))
+            break
         }
-      })
+      }
 
-      socket.on("disconnect", () => {
-        clearTimeout(timeout)
+      const onDisconnect = (): void => {
         if (!playerLoaded || !roomJoined) {
+          clearTimeout(timeout)
           reject(new Error("Disconnected before fully loaded"))
         }
-        this.emit("disconnect")
-      })
+      }
+
+      socket.on("message", onMessage)
+      socket.once("disconnect", onDisconnect)
     })
   }
 
@@ -163,6 +186,11 @@ export class Client extends EventEmitter {
   disconnect(): void {
     this.log?.("[disconnect] closing connection")
     this.adapter.disconnect()
+    this.cleanup()
+  }
+
+  private cleanup(): void {
+    this.connected = false
     this.player = null
     this.room = null
     this.users.clear()
@@ -226,6 +254,18 @@ export class Client extends EventEmitter {
         if (user && slot in user) {
           (user as Record<string, unknown>)[slot] = item
         }
+        break
+      }
+      case "kick": {
+        const reason = (args as { reason?: string }).reason ?? "unknown"
+        this.log?.("[kick]", reason)
+        this.cleanup()
+        break
+      }
+      case "close_with_error": {
+        const error = (args as { error?: string }).error ?? "unknown"
+        this.log?.("[kick]", error)
+        this.cleanup()
         break
       }
       default: {

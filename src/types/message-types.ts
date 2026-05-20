@@ -104,4 +104,11 @@ export type ServerMessages = {
   error: {
     error: number
   }
+  kick: {
+    reason: string
+  }
+  close_with_error: {
+    error: string
+  }
+  disconnect: void
 }

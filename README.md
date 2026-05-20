@@ -2,7 +2,7 @@
 
 Type-safe client library for Club Penguin Private Servers.
 
-Built with TypeScript, Socket.IO, and msgpack. Supports multiple CPPS backends through an adapter pattern — currently ships with CPJourney support.
+Built with TypeScript, Socket.IO, and msgpack. Supports multiple CPPS backends through an adapter pattern — ships with CPJourney and CPLegacy support.
 
 ## Install
 
@@ -44,7 +44,7 @@ Creates a new client instance.
 
 | Param | Type | Description |
 |---|---|---|
-| `server` | `"CPJourney"` | CPPS server identifier (strongly typed) |
+| `server` | `"CPJourney" \| "CPLegacy"` | CPPS server identifier (strongly typed) |
 | `options.debug` | `boolean \| LogFn` | Enable debug logging. Pass `true` for console.log, or a custom function |
 
 ```typescript
@@ -102,6 +102,7 @@ After `connect()` resolves, `client.player`, `client.room`, and `client.users` a
 | `client.player` | `PlayerData \| null` | Your penguin's full data (coins, inventory, settings, etc.) |
 | `client.room` | `number \| null` | Current room ID |
 | `client.users` | `Map<number, RoomUser>` | All penguins in the current room, keyed by ID |
+| `client.connected` | `boolean` | Whether the client is connected to a game server |
 
 `client.users` is automatically kept in sync — players are added/removed as they join/leave, positions and equipment update in real-time.
 
@@ -134,10 +135,20 @@ client.addItem(itemId)
 // Social
 client.buddyRequest(userId)
 client.buddyAccept(userId)
+client.buddyReject(userId)
+client.buddyRequestSeen(userId)
+client.getBuddy(userId, "buddies")      // fetch buddy details
+client.getBuddy(userId, "buddyRequests") // fetch request details
 client.removeBuddy(userId)
 client.addIgnore(userId)
 client.removeIgnore(userId)
 client.getPlayer(userId)
+client.sendPostcard(userId, "62")  // send mail (costs coins)
+
+// Stamps & Igloos
+client.getStamps(userId)           // view stampbook
+client.getIglooOpen(userId)        // check if igloo is open
+client.joinIgloo(userId)           // enter igloo
 
 // Animation
 client.sendFrame(frameId)
@@ -191,10 +202,28 @@ client.on("wait_queue_update", ({ position, queueLength }) => {
   console.log(`Queue: #${position}/${queueLength}`)
 })
 
+client.on("kick", ({ reason }) => {
+  console.log(`Kicked: ${reason}`)
+})
+
+client.on("close_with_error", ({ error }) => {
+  console.log(`Disconnected: ${error}`)
+})
+
+client.on("buddy_accept", ({ id, username, online }) => {
+  console.log(`${username} accepted your buddy request (online: ${online})`)
+})
+
+client.on("stamps_result", ({ stamps, username }) => {
+  console.log(`${username} has ${stamps.length} stamps`)
+})
+
 client.on("disconnect", () => {
   console.log("Connection lost")
 })
 ```
+
+The `kick` event fires on CPLegacy, `close_with_error` on CPJourney — both indicate the server forcibly disconnected the client (e.g. duplicate login). State is automatically cleaned up in both cases.
 
 ## Types
 

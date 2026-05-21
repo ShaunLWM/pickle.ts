@@ -134,11 +134,23 @@ export abstract class BaseAdapter {
     this.send("get_stamps", { userId })
   }
 
+  getPostcards(): void {
+    this.send("get_postcards", {})
+  }
+
   getIglooOpen(igloo: number): void {
     this.send("get_igloo_open", { igloo })
   }
 
   joinIgloo(igloo: number, x?: number, y?: number): void {
     this.send("join_igloo", { igloo, x: x ?? 0, y: y ?? 0 })
+  }
+
+  gameOver(coins: number): void {
+    this.send("game_over", { coins })
+  }
+
+  collectStamp(stamp: number): void {
+    this.send("collect_stamp", { stamp })
   }
 }

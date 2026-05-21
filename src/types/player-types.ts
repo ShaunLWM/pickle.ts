@@ -81,6 +81,15 @@ export type PlayerData = RoomUser & {
   towerExperience: number
 }
 
+export type Postcard = {
+  id: number
+  username: string
+  senderId: number
+  postcardId: number
+  extra: string | null
+  date: string
+}
+
 export type Mascot = {
   id: number
   name: string

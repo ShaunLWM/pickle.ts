@@ -1,4 +1,4 @@
-import type { Mascot, PlayerData, RoomUser } from "./player-types.js"
+import type { Mascot, PlayerData, Postcard, RoomUser } from "./player-types.js"
 import type { QueueUpdate } from "./adapter-types.js"
 
 export type ClientMessages = {
@@ -21,6 +21,7 @@ export type ClientMessages = {
   ignore_remove: { id: number }
   send_postcard: { userId: number; cardId: string }
   get_stamps: { userId: number }
+  get_postcards: Record<string, never>
   get_igloo_open: { igloo: number }
   join_igloo: { igloo: number; x?: number; y?: number }
   update_color: { item: number }
@@ -32,6 +33,8 @@ export type ClientMessages = {
   update_feet: { item: number }
   update_flag: { item: number }
   update_photo: { item: number }
+  game_over: { coins: number }
+  collect_stamp: { stamp: number }
   get_all_slots: Record<string, never>
   get_mascots: Record<string, never>
   get_weather: Record<string, never>
@@ -82,6 +85,23 @@ export type ServerMessages = {
   send_emote: {
     id: number
     emote: number
+  }
+  join_game_room: {
+    game: number
+  }
+  game_over: {
+    coins: number
+    hasStamps: boolean
+    totalStamps: number
+    collectedStamps: number
+    stampList: string[]
+    room: string
+    gift: boolean
+    doubleCoins: boolean
+    towerCoins: boolean
+  }
+  stamp_earned: {
+    stamp: number
   }
   set_weather: {
     type: string
@@ -153,6 +173,9 @@ export type ServerMessages = {
   }
   ignore_remove: {
     id: number
+  }
+  get_postcards: {
+    postcards: Postcard[]
   }
   get_igloo_open: {
     open: boolean

@@ -183,8 +183,11 @@ export class Client extends EventEmitter {
   getMascots(): void { this.adapter.getMascots() }
   sendPostcard(userId: number, cardId: string): void { this.adapter.sendPostcard(userId, cardId) }
   getStamps(userId: number): void { this.adapter.getStamps(userId) }
+  getPostcards(): void { this.adapter.getPostcards() }
   getIglooOpen(igloo: number): void { this.adapter.getIglooOpen(igloo) }
   joinIgloo(igloo: number, x?: number, y?: number): void { this.adapter.joinIgloo(igloo, x, y) }
+  gameOver(coins: number): void { this.adapter.gameOver(coins) }
+  collectStamp(stamp: number): void { this.adapter.collectStamp(stamp) }
 
   sleep(ms: number): Promise<void> {
     return new Promise(resolve => setTimeout(resolve, ms))

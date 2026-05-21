@@ -190,8 +190,8 @@ export type ServerMessages = {
     slot: string
   }
   slot: unknown[]
-  error: {
-    error: number
+  server_error: {
+    error: number | string
   }
   kick: {
     reason: string

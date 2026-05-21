@@ -114,6 +114,11 @@ export class Client extends EventEmitter {
             socket.off("message", onMessage)
             reject(new Error(`Kicked: ${(msg.args as { error?: string }).error ?? "unknown"}`))
             break
+          case "error":
+            clearTimeout(timeout)
+            socket.off("message", onMessage)
+            reject(new Error(`Server error: ${(msg.args as { error?: string | number }).error ?? "unknown"}`))
+            break
         }
       }
 
@@ -289,6 +294,7 @@ export class Client extends EventEmitter {
       }
     }
 
-    this.emit(action, args)
+    const eventName = action === "error" ? "server_error" : action
+    this.emit(eventName, args)
   }
 }

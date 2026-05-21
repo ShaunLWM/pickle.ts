@@ -212,8 +212,13 @@ export class Client extends EventEmitter {
     switch (action) {
       case "load_player": {
         const user = args.user as PlayerData
+        user.coins = args.coins as number ?? 0
+        user.inventory = args.inventory as number[] ?? []
+        user.furniture = args.furniture as unknown[] ?? []
+        user.flooring = args.flooring as unknown[] ?? []
+        user.rank = args.rank as number ?? 0
         this.player = user
-        this.log?.("[load_player]", user.username, `id=${user.id}`)
+        this.log?.("[load_player]", user.username, `id=${user.id}`, `coins=${user.coins}`, `inventory=${user.inventory.length}`)
         break
       }
       case "join_room": {

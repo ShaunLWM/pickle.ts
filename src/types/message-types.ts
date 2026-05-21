@@ -174,6 +174,10 @@ export type ServerMessages = {
   ignore_remove: {
     id: number
   }
+  add_item: {
+    item: number
+    coins: number
+  }
   get_postcards: {
     postcards: Postcard[]
   }

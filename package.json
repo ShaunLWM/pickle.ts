@@ -14,6 +14,9 @@
   "scripts": {
     "build": "tsup",
     "dev": "tsup --watch",
+    "check": "biome check --write",
+    "lint": "biome lint",
+    "format": "biome format --write",
     "typecheck": "tsc --noEmit",
     "prepare": "npm run build",
     "prepublishOnly": "npm run build"
@@ -24,6 +27,7 @@
     "tweetnacl": "^1.0.3"
   },
   "devDependencies": {
+    "@biomejs/biome": "2.4.15",
     "@types/node": "^22.0.0",
     "tsup": "^8.5.1",
     "typescript": "^5.7.2"

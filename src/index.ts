@@ -1,6 +1,20 @@
-export { Client, type ClientOptions, type LogFn } from "./client.js"
-export { BaseAdapter, type ConnectOptions } from "./adapters/base-adapter.js"
-export type { AdapterName } from "./adapters/index.js"
-export type { PlayerData, RoomUser, Buddy, PlayerAppearance, PlayerSettings, Mascot, Postcard } from "./types/player-types.js"
-export type { ClientMessages, ServerMessages } from "./types/message-types.js"
-export type { LoginOptions, TokenLoginOptions, ServerInfo, LoginResult, QueueUpdate } from "./types/adapter-types.js"
+export { BaseAdapter, type ConnectOptions } from "./adapters/base-adapter.js";
+export type { AdapterName } from "./adapters/index.js";
+export { Client, type ClientOptions, type LogFn } from "./client.js";
+export type {
+  LoginOptions,
+  LoginResult,
+  QueueUpdate,
+  ServerInfo,
+  TokenLoginOptions,
+} from "./types/adapter-types.js";
+export type { ClientMessages, ServerMessages } from "./types/message-types.js";
+export type {
+  Buddy,
+  Mascot,
+  PlayerAppearance,
+  PlayerData,
+  PlayerSettings,
+  Postcard,
+  RoomUser,
+} from "./types/player-types.js";

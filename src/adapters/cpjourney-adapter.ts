@@ -7,6 +7,7 @@ import type {
   ServerInfo,
   TokenLoginOptions,
 } from "../types/adapter-types.js";
+import type { Buddy, PlayerData, RoomUser } from "../types/player-types.js";
 import { BaseAdapter, type ConnectOptions } from "./base-adapter.js";
 
 const BASE_URL = "wss://play.cpjourney.net";
@@ -135,7 +136,10 @@ export class CpjourneyAdapter extends BaseAdapter {
               return;
             }
 
-            gameSocket.emit("message", { action: "join_server", args: {} });
+            gameSocket.emit("message", {
+              action: "join_server",
+              args: {},
+            });
             resolve();
             break;
           }
@@ -159,6 +163,210 @@ export class CpjourneyAdapter extends BaseAdapter {
   disconnect(): void {
     this.socket?.disconnect();
     this.socket = null;
+  }
+
+  override normalizeUser(raw: Record<string, unknown>): RoomUser {
+    return {
+      ...this.extractAppearance(raw),
+      id: raw.id as number,
+      username: raw.username as string,
+      displayName: raw.displayName as string | undefined,
+      joinTime: raw.joinTime as string | undefined,
+      x: (raw.x as number) ?? 0,
+      y: (raw.y as number) ?? 0,
+      frame: (raw.frame as number) ?? 0,
+      walking: raw.walking as number | undefined,
+      meta: {
+        hat: raw.hat,
+        face_mask: raw.face_mask,
+        neck_scarf: raw.neck_scarf,
+        body_shirt: raw.body_shirt,
+        hand_glove: raw.hand_glove,
+        transform: raw.transform,
+        walkingPuffleType: raw.walkingPuffleType,
+        openSprite: raw.openSprite,
+        mascotGiveaway: raw.mascotGiveaway,
+        iglooOpen: raw.iglooOpen,
+        iglooBounds: raw.iglooBounds,
+        igloo_slot: raw.igloo_slot,
+        currentLayer: raw.currentLayer,
+        fireRank: raw.fireRank,
+      },
+      _raw: raw,
+    };
+  }
+
+  override normalizePlayer(raw: Record<string, unknown>): PlayerData {
+    const user = raw.user as Record<string, unknown>;
+    const normalized = this.normalizeUser(user);
+    return {
+      ...normalized,
+      _raw: raw,
+      coins: (raw.coins as number) ?? 0,
+      rank: (raw.rank as number) ?? 0,
+      inventory: (raw.inventory as number[]) ?? [],
+      furniture: (raw.furniture as unknown[]) ?? [],
+      flooring: (raw.flooring as unknown[]) ?? [],
+      buddies: (user.buddies as Buddy[]) ?? [],
+      buddyRequests: (user.buddyRequests as number[]) ?? [],
+      ignores: (user.ignores as number[]) ?? [],
+      igloos: (user.igloos as unknown[]) ?? [],
+      meta: {
+        ...normalized.meta,
+        settings: user.settings,
+        puffleInventory: raw.puffleInventory ?? user.puffleInventory,
+        partyCoins: raw.partyCoins ?? user.partyCoins,
+        gems: raw.gems ?? user.gems,
+        streamer: raw.streamer ?? user.streamer,
+        username_verified: raw.username_verified ?? user.username_verified,
+        email_verified: raw.email_verified ?? user.email_verified,
+        inf_skill_points: raw.inf_skill_points ?? user.inf_skill_points,
+        highest_floor_reached:
+          raw.highest_floor_reached ?? user.highest_floor_reached,
+        towerMeters: raw.towerMeters ?? user.towerMeters,
+        towerExperience: raw.towerExperience ?? user.towerExperience,
+      },
+    };
+  }
+
+  override sendMessage(message: string): void {
+    this.send("send_message", { message });
+  }
+
+  override sendEmote(emote: number): void {
+    this.send("send_emote", { emote });
+  }
+
+  override sendSafe(safe: number): void {
+    this.send("send_safe", { safe });
+  }
+
+  override walk(x: number, y: number): void {
+    this.send("send_position", { x, y });
+  }
+
+  override sendFrame(frame: number, set?: boolean): void {
+    this.send("send_frame", { frame, set });
+  }
+
+  override snowball(x: number, y: number): void {
+    this.send("snowball", { x, y });
+  }
+
+  override joinRoom(room: number, x?: number, y?: number): void {
+    this.send("join_room", { room, x: x ?? 0, y: y ?? 0 });
+  }
+
+  override addItem(item: number): void {
+    this.send("add_item", { item });
+  }
+
+  override equipColor(item: number): void {
+    this.send("update_color", { item });
+  }
+
+  override equipHead(item: number): void {
+    this.send("update_head", { item });
+  }
+
+  override equipFace(item: number): void {
+    this.send("update_face", { item });
+  }
+
+  override equipNeck(item: number): void {
+    this.send("update_neck", { item });
+  }
+
+  override equipBody(item: number): void {
+    this.send("update_body", { item });
+  }
+
+  override equipHand(item: number): void {
+    this.send("update_hand", { item });
+  }
+
+  override equipFeet(item: number): void {
+    this.send("update_feet", { item });
+  }
+
+  override equipFlag(item: number): void {
+    this.send("update_flag", { item });
+  }
+
+  override equipPhoto(item: number): void {
+    this.send("update_photo", { item });
+  }
+
+  override buddyRequest(id: number): void {
+    this.send("buddy_request", { id });
+  }
+
+  override buddyAccept(id: number): void {
+    this.send("buddy_accept", { id });
+  }
+
+  override buddyReject(id: number): void {
+    this.send("buddy_reject", { id });
+  }
+
+  override buddyRequestSeen(id: number): void {
+    this.send("buddy_request_seen", { id });
+  }
+
+  override getBuddy(id: number, type: "buddies" | "buddyRequests"): void {
+    this.send("get_buddy", { id, type });
+  }
+
+  override removeBuddy(id: number): void {
+    this.send("remove_buddy", { id });
+  }
+
+  override addIgnore(id: number): void {
+    this.send("ignore_add", { id });
+  }
+
+  override removeIgnore(id: number): void {
+    this.send("ignore_remove", { id });
+  }
+
+  override getPlayer(id: number): void {
+    this.send("get_player", { id });
+  }
+
+  override getAllSlots(): void {
+    this.send("get_all_slots", {});
+  }
+
+  override getMascots(): void {
+    this.send("get_mascots", {});
+  }
+
+  override sendPostcard(userId: number, cardId: string): void {
+    this.send("send_postcard", { userId, cardId });
+  }
+
+  override getStamps(userId: number): void {
+    this.send("get_stamps", { userId });
+  }
+
+  override getPostcards(): void {
+    this.send("get_postcards", {});
+  }
+
+  override getIglooOpen(igloo: number): void {
+    this.send("get_igloo_open", { igloo });
+  }
+
+  override joinIgloo(igloo: number, x?: number, y?: number): void {
+    this.send("join_igloo", { igloo, x: x ?? 0, y: y ?? 0 });
+  }
+
+  override gameOver(coins: number): void {
+    this.send("game_over", { coins });
+  }
+
+  override collectStamp(stamp: number): void {
+    this.send("collect_stamp", { stamp });
   }
 
   private createSocket(path: string): Socket {

@@ -8,6 +8,7 @@ import type {
   ServerInfo,
   TokenLoginOptions,
 } from "../types/adapter-types.js";
+import type { Buddy, PlayerData, RoomUser } from "../types/player-types.js";
 import { BaseAdapter, type ConnectOptions } from "./base-adapter.js";
 
 const CRUMBS_URL =
@@ -343,6 +344,147 @@ export class NewcpAdapter extends BaseAdapter {
   disconnect(): void {
     this.socket?.disconnect();
     this.socket = null;
+  }
+
+  override normalizeUser(raw: Record<string, unknown>): RoomUser {
+    return {
+      ...this.extractAppearance(raw),
+      id: raw.id as number,
+      username: raw.username as string,
+      displayName: raw.nickname as string | undefined,
+      x: (raw.x as number) ?? 0,
+      y: (raw.y as number) ?? 0,
+      frame: (raw.frame as number) ?? 0,
+      meta: {
+        nickname: raw.nickname,
+        registrationDate: raw.registrationDate,
+        customNameColor: raw.customNameColor,
+        customBubbleColor: raw.customBubbleColor,
+        customBubbleTextColor: raw.customBubbleTextColor,
+        wallHacks: raw.wallHacks,
+        moderator: raw.moderator,
+        character: raw.character,
+        approved: raw.approved,
+        walking: raw.walking,
+      },
+      _raw: raw,
+    };
+  }
+
+  override normalizePlayer(raw: Record<string, unknown>): PlayerData {
+    const user = raw.user as Record<string, unknown>;
+    return {
+      ...this.normalizeUser(user),
+      _raw: raw,
+      coins: (raw.coins as number) ?? 0,
+      rank: (raw.rank as number) ?? 0,
+      inventory: (raw.inventory as number[]) ?? [],
+      buddies: (raw.buddies as Buddy[]) ?? [],
+      ignores: (raw.ignores as number[]) ?? [],
+      furniture: raw.furniture as Record<string, unknown> | undefined,
+      flooring: (raw.floorings as unknown[]) ?? [],
+      igloos: (raw.igloos as unknown[]) ?? [],
+    };
+  }
+
+  override sendMessage(message: string): void {
+    this.send("send_message", { message });
+  }
+
+  override sendEmote(emote: number): void {
+    this.send("send_emote", { emote });
+  }
+
+  override sendSafe(safe: number): void {
+    this.send("send_safe", { safe });
+  }
+
+  override walk(x: number, y: number): void {
+    this.send("send_position", { x, y });
+  }
+
+  override sendFrame(frame: number, set?: boolean): void {
+    this.send("send_frame", { frame, set });
+  }
+
+  override snowball(x: number, y: number): void {
+    this.send("snowball", { x, y });
+  }
+
+  override joinRoom(room: number, x?: number, y?: number): void {
+    this.send("join_room", { room, x: x ?? 0, y: y ?? 0 });
+  }
+
+  override addItem(item: number): void {
+    this.send("add_item", { item });
+  }
+
+  override equipColor(item: number): void {
+    this.send("update_color", { item });
+  }
+
+  override equipHead(item: number): void {
+    this.send("update_head", { item });
+  }
+
+  override equipFace(item: number): void {
+    this.send("update_face", { item });
+  }
+
+  override equipNeck(item: number): void {
+    this.send("update_neck", { item });
+  }
+
+  override equipBody(item: number): void {
+    this.send("update_body", { item });
+  }
+
+  override equipHand(item: number): void {
+    this.send("update_hand", { item });
+  }
+
+  override equipFeet(item: number): void {
+    this.send("update_feet", { item });
+  }
+
+  override equipFlag(item: number): void {
+    this.send("update_flag", { item });
+  }
+
+  override equipPhoto(item: number): void {
+    this.send("update_photo", { item });
+  }
+
+  override buddyRequest(id: number): void {
+    this.send("buddy_request", { id });
+  }
+
+  override buddyAccept(id: number): void {
+    this.send("buddy_accept", { id });
+  }
+
+  override buddyReject(id: number): void {
+    this.send("buddy_reject", { id });
+  }
+
+  override removeBuddy(id: number): void {
+    this.send("remove_buddy", { id });
+  }
+
+  override addIgnore(id: number): void {
+    this.send("ignore_add", { id });
+  }
+
+  override removeIgnore(id: number): void {
+    this.send("ignore_remove", { id });
+  }
+
+  override getPlayer(id: number): void {
+    this.send("get_player", { id });
+  }
+
+  override joinIgloo(igloo: number, x?: number, y?: number): void {
+    this.send("join_igloo", { igloo, x: x ?? 0, y: y ?? 0 });
   }
 
   private createSocket(host: string, path: string): Socket {

@@ -324,39 +324,43 @@ export class Client extends EventEmitter {
 
   private handleMessage(msg: MessagePayload): void {
     const { action, args } = msg;
+    let emitArgs: unknown = args;
 
     switch (action) {
       case "load_player": {
-        const user = args.user as PlayerData;
-        user.coins = (args.coins as number) ?? 0;
-        user.inventory = (args.inventory as number[]) ?? [];
-        user.furniture = (args.furniture as unknown[]) ?? [];
-        user.flooring = (args.flooring as unknown[]) ?? [];
-        user.rank = (args.rank as number) ?? 0;
-        this.player = user;
+        const player = this.adapter.normalizePlayer(args);
+        this.player = player;
+        emitArgs = { user: player };
         this.log?.(
           "[load_player]",
-          user.username,
-          `id=${user.id}`,
-          `coins=${user.coins}`,
-          `inventory=${user.inventory.length}`,
+          player.username,
+          `id=${player.id}`,
+          `coins=${player.coins}`,
+          `inventory=${player.inventory.length}`,
         );
         break;
       }
       case "join_room": {
         const room = args.room as number;
-        const users = args.users as RoomUser[];
+        const rawUsers = args.users as Record<string, unknown>[];
         this.room = room;
         this.users.clear();
-        for (const user of users) {
+        const users: RoomUser[] = [];
+        for (const rawUser of rawUsers) {
+          const user = this.adapter.normalizeUser(rawUser);
           this.users.set(user.id, user);
+          users.push(user);
         }
+        emitArgs = { room, users };
         this.log?.("[join_room]", `room=${room}`, `users=${users.length}`);
         break;
       }
       case "add_player": {
-        const user = args.user as RoomUser;
+        const user = this.adapter.normalizeUser(
+          args.user as Record<string, unknown>,
+        );
         this.users.set(user.id, user);
+        emitArgs = { user };
         this.log?.("[add_player]", user.username, `id=${user.id}`);
         break;
       }
@@ -412,6 +416,6 @@ export class Client extends EventEmitter {
     }
 
     const eventName = action === "error" ? "server_error" : action;
-    this.emit(eventName, args);
+    this.emit(eventName, emitArgs);
   }
 }

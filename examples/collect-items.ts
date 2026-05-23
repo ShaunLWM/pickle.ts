@@ -187,13 +187,13 @@ async function tryAddItem(id: number, item: CrumbItem): Promise<boolean> {
 
     const onSuccess = (args: { item: number; coins: number }) => {
       clearTimeout(timeout);
-      client.off("error" as never, onError);
+      client.off("server_error", onError);
       currentCoins = args.coins;
       resolve(true);
     };
 
     client.once("add_item" as never, onSuccess);
-    client.once("error" as never, onError);
+    client.once("server_error", onError);
     client.addItem(id);
   });
 }

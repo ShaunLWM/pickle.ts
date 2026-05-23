@@ -1,21 +1,17 @@
+/** Core appearance slots shared by all servers (CPJourney, CPLegacy, NewCP). */
 export type PlayerAppearance = {
   color: number;
-  hat: number;
   head: number;
   face: number;
-  face_mask: number;
   neck: number;
-  neck_scarf: number;
   body: number;
-  body_shirt: number;
   hand: number;
-  hand_glove: number;
   feet: number;
   flag: number;
   photo: number;
-  transform: number;
 };
 
+/** CPJourney only */
 export type PlayerSettings = {
   music_volume: number;
   sfx_volume: number;
@@ -34,51 +30,65 @@ export type Buddy = {
   id: number;
   username: string;
   online: boolean;
-  favorite: boolean;
-  items: number[];
-  onlineServer: string;
+  /** CPJourney only */
+  favorite?: boolean;
+  /** CPJourney only */
+  items?: number[];
+  /** CPJourney only */
+  onlineServer?: string;
 };
 
+/**
+ * A penguin visible in a room. Only fields present on 2+ servers are
+ * top-level. Single-server extras live in `meta`.
+ *
+ * Display name mapping:
+ * - CPJourney: `displayName`
+ * - CPLegacy: `realUsername` → `displayName`
+ * - NewCP: `nickname` → `displayName`
+ */
 export type RoomUser = PlayerAppearance & {
   id: number;
   username: string;
-  displayName: string;
-  joinTime: string;
   x: number;
   y: number;
   frame: number;
-  walking: number;
-  walkingPuffleType: number;
-  openSprite?: string;
-  mascotGiveaway?: unknown;
-  iglooOpen: number;
-  iglooBounds: number;
-  igloo_slot: number;
-  currentLayer: number;
-  fireRank: number;
+  /** Adapter-specific extras. See each adapter's normalizeUser for keys. */
+  meta: Record<string, unknown>;
+  /** Original unnormalized server response */
+  _raw: Record<string, unknown>;
+  /** Display name — source field varies per server, normalized here */
+  displayName?: string;
+  /** CPJourney, CPLegacy */
+  joinTime?: string;
+  /** CPJourney: puffle type number, CPLegacy: walking puffle ID */
+  walking?: number;
 };
 
+/**
+ * Full player data from `load_player`. Only fields present on 2+ servers
+ * are top-level. Single-server extras live in `meta`.
+ *
+ * Coins/rank source:
+ * - CPJourney/NewCP: sibling fields of `user` in `load_player` args
+ * - CPLegacy: inside `user` object directly
+ */
 export type PlayerData = RoomUser & {
   coins: number;
-  partyCoins: number;
-  gems: number;
   rank: number;
-  streamer: boolean;
-  username_verified: boolean;
-  email_verified: boolean;
-  settings: PlayerSettings;
-  buddies: Buddy[];
-  buddyRequests: number[];
-  ignores: number[];
   inventory: number[];
-  puffleInventory: unknown[];
-  igloos: unknown[];
-  furniture: unknown[];
-  flooring: unknown[];
-  inf_skill_points: number;
-  highest_floor_reached: number;
-  towerMeters: number;
-  towerExperience: number;
+  /** CPJourney, NewCP */
+  buddies?: Buddy[];
+  /** CPJourney, CPLegacy (CPLegacy maps from `pending` array) */
+  buddyRequests?: number[];
+  /** CPJourney, NewCP */
+  ignores?: number[];
+  /** All servers — CPJourney: array, CPLegacy/NewCP: Record<string, number> */
+  furniture?: unknown[] | Record<string, unknown>;
+  /** CPJourney, NewCP */
+  flooring?: unknown[];
+  /** CPJourney, NewCP */
+  igloos?: unknown[];
 };
 
 export type Postcard = {

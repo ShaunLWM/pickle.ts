@@ -5,6 +5,11 @@ import type {
   QueueUpdate,
   TokenLoginOptions,
 } from "../types/adapter-types.js";
+import type {
+  PlayerAppearance,
+  PlayerData,
+  RoomUser,
+} from "../types/player-types.js";
 
 export type ConnectOptions = {
   onQueueUpdate?: (update: QueueUpdate) => void;
@@ -25,143 +30,165 @@ export abstract class BaseAdapter {
   abstract disconnect(): void;
   abstract send(action: string, args: Record<string, unknown>): void;
 
-  sendMessage(message: string): void {
-    this.send("send_message", { message });
+  normalizeUser(_raw: Record<string, unknown>): RoomUser {
+    throw new Error("Not implemented: normalizeUser");
   }
 
-  sendEmote(emote: number): void {
-    this.send("send_emote", { emote });
+  normalizePlayer(_raw: Record<string, unknown>): PlayerData {
+    throw new Error("Not implemented: normalizePlayer");
   }
 
-  sendSafe(safe: number): void {
-    this.send("send_safe", { safe });
+  protected extractAppearance(raw: Record<string, unknown>): PlayerAppearance {
+    return {
+      color: (raw.color as number) ?? 0,
+      head: (raw.head as number) ?? 0,
+      face: (raw.face as number) ?? 0,
+      neck: (raw.neck as number) ?? 0,
+      body: (raw.body as number) ?? 0,
+      hand: (raw.hand as number) ?? 0,
+      feet: (raw.feet as number) ?? 0,
+      flag: (raw.flag as number) ?? 0,
+      photo: (raw.photo as number) ?? 0,
+    };
   }
 
-  walk(x: number, y: number): void {
-    this.send("send_position", { x, y });
+  sendMessage(_message: string): void {
+    throw new Error("Not implemented: sendMessage");
   }
 
-  sendFrame(frame: number, set?: boolean): void {
-    this.send("send_frame", { frame, set });
+  sendEmote(_emote: number): void {
+    throw new Error("Not implemented: sendEmote");
   }
 
-  snowball(x: number, y: number): void {
-    this.send("snowball", { x, y });
+  sendSafe(_safe: number): void {
+    throw new Error("Not implemented: sendSafe");
   }
 
-  joinRoom(room: number, x?: number, y?: number): void {
-    this.send("join_room", { room, x: x ?? 0, y: y ?? 0 });
+  walk(_x: number, _y: number): void {
+    throw new Error("Not implemented: walk");
   }
 
-  addItem(item: number): void {
-    this.send("add_item", { item });
+  sendFrame(_frame: number, _set?: boolean): void {
+    throw new Error("Not implemented: sendFrame");
   }
 
-  equipColor(item: number): void {
-    this.send("update_color", { item });
+  snowball(_x: number, _y: number): void {
+    throw new Error("Not implemented: snowball");
   }
 
-  equipHead(item: number): void {
-    this.send("update_head", { item });
+  joinRoom(_room: number, _x?: number, _y?: number): void {
+    throw new Error("Not implemented: joinRoom");
   }
 
-  equipFace(item: number): void {
-    this.send("update_face", { item });
+  addItem(_item: number): void {
+    throw new Error("Not implemented: addItem");
   }
 
-  equipNeck(item: number): void {
-    this.send("update_neck", { item });
+  equipColor(_item: number): void {
+    throw new Error("Not implemented: equipColor");
   }
 
-  equipBody(item: number): void {
-    this.send("update_body", { item });
+  equipHead(_item: number): void {
+    throw new Error("Not implemented: equipHead");
   }
 
-  equipHand(item: number): void {
-    this.send("update_hand", { item });
+  equipFace(_item: number): void {
+    throw new Error("Not implemented: equipFace");
   }
 
-  equipFeet(item: number): void {
-    this.send("update_feet", { item });
+  equipNeck(_item: number): void {
+    throw new Error("Not implemented: equipNeck");
   }
 
-  equipFlag(item: number): void {
-    this.send("update_flag", { item });
+  equipBody(_item: number): void {
+    throw new Error("Not implemented: equipBody");
   }
 
-  equipPhoto(item: number): void {
-    this.send("update_photo", { item });
+  equipHand(_item: number): void {
+    throw new Error("Not implemented: equipHand");
   }
 
-  buddyRequest(id: number): void {
-    this.send("buddy_request", { id });
+  equipFeet(_item: number): void {
+    throw new Error("Not implemented: equipFeet");
   }
 
-  buddyAccept(id: number): void {
-    this.send("buddy_accept", { id });
+  equipFlag(_item: number): void {
+    throw new Error("Not implemented: equipFlag");
   }
 
-  buddyReject(id: number): void {
-    this.send("buddy_reject", { id });
+  equipPhoto(_item: number): void {
+    throw new Error("Not implemented: equipPhoto");
   }
 
-  buddyRequestSeen(id: number): void {
-    this.send("buddy_request_seen", { id });
+  buddyRequest(_id: number): void {
+    throw new Error("Not implemented: buddyRequest");
   }
 
-  getBuddy(id: number, type: "buddies" | "buddyRequests"): void {
-    this.send("get_buddy", { id, type });
+  buddyAccept(_id: number): void {
+    throw new Error("Not implemented: buddyAccept");
   }
 
-  removeBuddy(id: number): void {
-    this.send("remove_buddy", { id });
+  buddyReject(_id: number): void {
+    throw new Error("Not implemented: buddyReject");
   }
 
-  addIgnore(id: number): void {
-    this.send("ignore_add", { id });
+  buddyRequestSeen(_id: number): void {
+    throw new Error("Not implemented: buddyRequestSeen");
   }
 
-  removeIgnore(id: number): void {
-    this.send("ignore_remove", { id });
+  getBuddy(_id: number, _type: "buddies" | "buddyRequests"): void {
+    throw new Error("Not implemented: getBuddy");
   }
 
-  getPlayer(id: number): void {
-    this.send("get_player", { id });
+  removeBuddy(_id: number): void {
+    throw new Error("Not implemented: removeBuddy");
+  }
+
+  addIgnore(_id: number): void {
+    throw new Error("Not implemented: addIgnore");
+  }
+
+  removeIgnore(_id: number): void {
+    throw new Error("Not implemented: removeIgnore");
+  }
+
+  getPlayer(_id: number): void {
+    throw new Error("Not implemented: getPlayer");
   }
 
   getAllSlots(): void {
-    this.send("get_all_slots", {});
+    throw new Error("Not implemented: getAllSlots");
   }
 
   getMascots(): void {
-    this.send("get_mascots", {});
+    throw new Error("Not implemented: getMascots");
   }
 
-  sendPostcard(userId: number, cardId: string): void {
-    this.send("send_postcard", { userId, cardId });
+  sendPostcard(_userId: number, _cardId: string): void {
+    throw new Error("Not implemented: sendPostcard");
   }
 
-  getStamps(userId: number): void {
-    this.send("get_stamps", { userId });
+  getStamps(_userId: number): void {
+    throw new Error("Not implemented: getStamps");
   }
 
   getPostcards(): void {
-    this.send("get_postcards", {});
+    throw new Error("Not implemented: getPostcards");
   }
 
-  getIglooOpen(igloo: number): void {
-    this.send("get_igloo_open", { igloo });
+  getIglooOpen(_igloo: number): void {
+    throw new Error("Not implemented: getIglooOpen");
   }
 
-  joinIgloo(igloo: number, x?: number, y?: number): void {
-    this.send("join_igloo", { igloo, x: x ?? 0, y: y ?? 0 });
+  joinIgloo(_igloo: number, _x?: number, _y?: number): void {
+    throw new Error("Not implemented: joinIgloo");
   }
 
-  gameOver(coins: number): void {
-    this.send("game_over", { coins });
+  gameOver(_coins: number): void {
+    throw new Error("Not implemented: gameOver");
   }
 
-  collectStamp(stamp: number): void {
-    this.send("collect_stamp", { stamp });
+  collectStamp(_stamp: number): void {
+    throw new Error("Not implemented: collectStamp");
   }
 }

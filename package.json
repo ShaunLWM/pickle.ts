@@ -24,11 +24,13 @@
   "dependencies": {
     "socket.io-client": "^4.8.1",
     "socket.io-msgpack-parser": "^3.0.2",
-    "tweetnacl": "^1.0.3"
+    "tweetnacl": "^1.0.3",
+    "ws": "^8.21.0"
   },
   "devDependencies": {
     "@biomejs/biome": "2.4.15",
     "@types/node": "^22.0.0",
+    "@types/ws": "^8.18.1",
     "tsup": "^8.5.1",
     "typescript": "^5.7.2"
   },

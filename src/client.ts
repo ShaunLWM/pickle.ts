@@ -45,7 +45,8 @@ export class Client extends EventEmitter {
   private _cardJitsu: CardJitsu | null = null;
 
   get cardJitsu(): CardJitsu {
-    if (!this._cardJitsu) this._cardJitsu = new CardJitsu(this.adapter);
+    if (!this._cardJitsu)
+      this._cardJitsu = new CardJitsu(this.adapter, this.waitFor.bind(this));
     return this._cardJitsu;
   }
 
@@ -206,6 +207,42 @@ export class Client extends EventEmitter {
     return super.emit(event, ...args);
   }
 
+  /** Wait for a server event. Resolves with the event payload. Optional timeout in ms. Rejects on disconnect. */
+  waitFor<K extends keyof ServerMessages>(
+    event: K,
+    timeout?: number,
+  ): Promise<ServerMessages[K]> {
+    return new Promise<ServerMessages[K]>((resolve, reject) => {
+      let timer: ReturnType<typeof setTimeout> | undefined;
+
+      const cleanup = (): void => {
+        if (timer) clearTimeout(timer);
+        this.off(event, handler as unknown as (...args: unknown[]) => void);
+        this.off("disconnect", onDisconnect);
+      };
+
+      const handler = ((args: ServerMessages[K]) => {
+        cleanup();
+        resolve(args);
+      }) as ServerMessageHandler<K>;
+
+      const onDisconnect = (): void => {
+        cleanup();
+        reject(new Error(`Disconnected while waiting for ${String(event)}`));
+      };
+
+      if (timeout !== undefined) {
+        timer = setTimeout(() => {
+          cleanup();
+          reject(new Error(`Timed out waiting for ${String(event)}`));
+        }, timeout);
+      }
+
+      this.once(event, handler);
+      this.once("disconnect", onDisconnect);
+    });
+  }
+
   sendMessage(message: string): void {
     this.adapter.sendMessage(message);
   }
@@ -224,11 +261,17 @@ export class Client extends EventEmitter {
   snowball(x: number, y: number): void {
     this.adapter.snowball(x, y);
   }
-  joinRoom(room: number, x?: number, y?: number): void {
+  joinRoom(
+    room: number,
+    x?: number,
+    y?: number,
+  ): Promise<ServerMessages["join_room"]> {
     this.adapter.joinRoom(room, x, y);
+    return this.waitFor("join_room");
   }
-  addItem(item: number): void {
+  addItem(item: number): Promise<ServerMessages["add_item"]> {
     this.adapter.addItem(item);
+    return this.waitFor("add_item");
   }
   equipColor(item: number): void {
     this.adapter.equipColor(item);
@@ -260,56 +303,82 @@ export class Client extends EventEmitter {
   buddyRequest(id: number): void {
     this.adapter.buddyRequest(id);
   }
-  buddyAccept(id: number): void {
+  buddyAccept(id: number): Promise<ServerMessages["buddy_accept"]> {
     this.adapter.buddyAccept(id);
+    return this.waitFor("buddy_accept");
   }
-  buddyReject(id: number): void {
+  buddyReject(id: number): Promise<ServerMessages["buddy_reject"]> {
     this.adapter.buddyReject(id);
+    return this.waitFor("buddy_reject");
   }
-  buddyRequestSeen(id: number): void {
+  buddyRequestSeen(id: number): Promise<ServerMessages["buddy_request_seen"]> {
     this.adapter.buddyRequestSeen(id);
+    return this.waitFor("buddy_request_seen");
   }
-  getBuddy(id: number, type: "buddies" | "buddyRequests"): void {
+  getBuddy(
+    id: number,
+    type: "buddies" | "buddyRequests",
+  ): Promise<ServerMessages["get_buddy"]> {
     this.adapter.getBuddy(id, type);
+    return this.waitFor("get_buddy");
   }
   removeBuddy(id: number): void {
     this.adapter.removeBuddy(id);
   }
-  addIgnore(id: number): void {
+  addIgnore(id: number): Promise<ServerMessages["ignore_add"]> {
     this.adapter.addIgnore(id);
+    return this.waitFor("ignore_add");
   }
-  removeIgnore(id: number): void {
+  removeIgnore(id: number): Promise<ServerMessages["ignore_remove"]> {
     this.adapter.removeIgnore(id);
+    return this.waitFor("ignore_remove");
   }
-  getPlayer(id: number): void {
+  getPlayer(id: number): Promise<ServerMessages["get_player"]> {
     this.adapter.getPlayer(id);
+    return this.waitFor("get_player");
   }
-  getAllSlots(): void {
+  getAllSlots(): Promise<ServerMessages["slot"]> {
     this.adapter.getAllSlots();
+    return this.waitFor("slot");
   }
-  getMascots(): void {
+  getMascots(): Promise<ServerMessages["get_mascots"]> {
     this.adapter.getMascots();
+    return this.waitFor("get_mascots");
   }
-  sendPostcard(userId: number, cardId: string): void {
+  sendPostcard(
+    userId: number,
+    cardId: string,
+  ): Promise<ServerMessages["send_postcard"]> {
     this.adapter.sendPostcard(userId, cardId);
+    return this.waitFor("send_postcard");
   }
-  getStamps(userId: number): void {
+  getStamps(userId: number): Promise<ServerMessages["stamps_result"]> {
     this.adapter.getStamps(userId);
+    return this.waitFor("stamps_result");
   }
-  getPostcards(): void {
+  getPostcards(): Promise<ServerMessages["get_postcards"]> {
     this.adapter.getPostcards();
+    return this.waitFor("get_postcards");
   }
-  getIglooOpen(igloo: number): void {
+  getIglooOpen(igloo: number): Promise<ServerMessages["get_igloo_open"]> {
     this.adapter.getIglooOpen(igloo);
+    return this.waitFor("get_igloo_open");
   }
-  joinIgloo(igloo: number, x?: number, y?: number): void {
+  joinIgloo(
+    igloo: number,
+    x?: number,
+    y?: number,
+  ): Promise<ServerMessages["join_room"]> {
     this.adapter.joinIgloo(igloo, x, y);
+    return this.waitFor("join_room");
   }
-  gameOver(coins: number): void {
+  gameOver(coins: number): Promise<ServerMessages["game_over"]> {
     this.adapter.gameOver(coins);
+    return this.waitFor("game_over");
   }
-  collectStamp(stamp: number): void {
+  collectStamp(stamp: number): Promise<ServerMessages["stamp_earned"]> {
     this.adapter.collectStamp(stamp);
+    return this.waitFor("stamp_earned");
   }
 
   sleep(ms: number): Promise<void> {

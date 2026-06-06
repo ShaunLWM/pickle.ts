@@ -149,18 +149,14 @@ client.on("game_won", ({ winner, message }) => {
   cancelWaitTimer();
 
   // Return to Dojo and resume watching
-  setTimeout(() => {
+  client.sleep(3000).then(async () => {
     console.log("[BOT] Returning to Dojo...");
-    client.joinRoom(DOJO);
-    client.once("join_room", () => {
-      console.log("[BOT] Back in Dojo. Watching mats...");
-      client.cardJitsu.getMats();
-      client.once("get_waddles", (data) => {
-        mats = data.waddles;
-        checkMats();
-      });
-    });
-  }, 3000);
+    await client.joinRoom(DOJO);
+    console.log("[BOT] Back in Dojo. Watching mats...");
+    const data = await client.cardJitsu.getMats();
+    mats = data.waddles;
+    checkMats();
+  });
 });
 
 client.on("disconnect", () => {
@@ -171,15 +167,10 @@ client.on("disconnect", () => {
 // --- Start: go to Dojo and watch ---
 
 await client.sleep(1000);
-client.joinRoom(DOJO);
-await new Promise<void>((resolve) => {
-  client.once("join_room", () => resolve());
-});
+await client.joinRoom(DOJO);
 console.log(`[BOT] Arrived at Dojo. Watching mats...`);
 
-client.cardJitsu.getMats();
-client.once("get_waddles", (data) => {
-  mats = data.waddles;
-  console.log("[BOT] Mat state:", mats);
-  checkMats();
-});
+const { waddles: initialMats } = await client.cardJitsu.getMats();
+mats = initialMats;
+console.log("[BOT] Mat state:", mats);
+checkMats();

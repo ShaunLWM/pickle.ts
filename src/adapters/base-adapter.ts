@@ -191,4 +191,44 @@ export abstract class BaseAdapter {
   collectStamp(_stamp: number): void {
     throw new Error("Not implemented: collectStamp");
   }
+
+  /** Fetch ninja rank, progress, and card deck. Listen for `get_ninja` event. */
+  getNinja(): void {
+    throw new Error("Not implemented: getNinja");
+  }
+
+  /** Fetch state of all Dojo mats. Listen for `get_waddles` event. */
+  getMats(): void {
+    throw new Error("Not implemented: getMats");
+  }
+
+  /** Join Sensei matchmaking queue. Listen for `tick_matchmaking` events. */
+  joinMatchmaking(): void {
+    throw new Error("Not implemented: joinMatchmaking");
+  }
+
+  /** Leave Sensei matchmaking queue. */
+  leaveMatchmaking(): void {
+    throw new Error("Not implemented: leaveMatchmaking");
+  }
+
+  /** Start a Card-Jitsu match after entering a game room. Listen for `start_game` event. */
+  startGame(): void {
+    throw new Error("Not implemented: startGame");
+  }
+
+  /** Play a card from your hand by slot index. Listen for `move_my_card` event. */
+  selectCard(_slot: number): void {
+    throw new Error("Not implemented: selectCard");
+  }
+
+  /** Preload a power card animation asset. */
+  loadAnimation(_animation: string): void {
+    throw new Error("Not implemented: loadAnimation");
+  }
+
+  /** Sit on a Dojo mat to wait for an opponent. Listen for `update_waddle` events. */
+  joinMat(_waddle: number): void {
+    throw new Error("Not implemented: joinMat");
+  }
 }

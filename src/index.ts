@@ -1,6 +1,7 @@
 export { BaseAdapter, type ConnectOptions } from "./adapters/base-adapter.js";
 export type { AdapterName } from "./adapters/index.js";
 export { Client, type ClientOptions, type LogFn } from "./client.js";
+export { CardJitsu } from "./games/card-jitsu.js";
 export type {
   LoginOptions,
   LoginResult,
@@ -11,10 +12,18 @@ export type {
 export type { ClientMessages, ServerMessages } from "./types/message-types.js";
 export type {
   Buddy,
+  GameCard,
+  GamePlayer,
   Mascot,
+  MatState,
+  NinjaCard,
+  NinjaData,
+  NinjaProgress,
   PlayerAppearance,
   PlayerData,
   PlayerSettings,
   Postcard,
+  RevealedCard,
   RoomUser,
+  RoundResult,
 } from "./types/player-types.js";

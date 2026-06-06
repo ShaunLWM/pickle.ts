@@ -1,5 +1,15 @@
 import type { QueueUpdate } from "./adapter-types.js";
-import type { Mascot, PlayerData, Postcard, RoomUser } from "./player-types.js";
+import type {
+  GameCard,
+  GamePlayer,
+  Mascot,
+  MatState,
+  NinjaData,
+  PlayerData,
+  Postcard,
+  RoomUser,
+  RoundResult,
+} from "./player-types.js";
 
 export type ClientMessages = {
   send_position: { x: number; y: number };
@@ -40,6 +50,22 @@ export type ClientMessages = {
   get_weather: Record<string, never>;
   join_server: Record<string, never>;
   check_puffle_sprite: { puffleSprite: unknown };
+  /** Fetch ninja rank, progress, and card deck */
+  get_ninja: Record<string, never>;
+  /** Fetch state of all Dojo mats (wire: get_waddles) */
+  get_waddles: Record<string, never>;
+  /** Join Sensei matchmaking queue */
+  join_matchmaking: Record<string, never>;
+  /** Leave Sensei matchmaking queue */
+  leave_matchmaking: Record<string, never>;
+  /** Start a Card-Jitsu match after entering a game room */
+  start_game: Record<string, never>;
+  /** Play a card from your hand by slot index */
+  select_card: { slot: number };
+  /** Preload a power card animation */
+  load_animation: { animation: string };
+  /** Sit on a Dojo mat to wait for an opponent (wire: join_waddle) */
+  join_waddle: { waddle: number };
 };
 
 export type ServerMessages = {
@@ -200,4 +226,36 @@ export type ServerMessages = {
     error: string;
   };
   disconnect: undefined;
+  /** Ninja rank, progress, and full card deck */
+  get_ninja: NinjaData;
+  /** State of all Dojo mats — keys are mat IDs, values are seat arrays */
+  get_waddles: { waddles: MatState };
+  /** A player sat on or left a Dojo mat */
+  update_waddle: { waddle: number; seat: number; username: string | null };
+  /** Acknowledged entry into matchmaking queue */
+  join_matchmaking: Record<string, never>;
+  /** Matchmaking countdown tick with queued player names */
+  tick_matchmaking: { tick: number; users: string[] };
+  /** Match started — contains both players with seat assignments */
+  start_game: { users: GamePlayer[] };
+  /** Cards dealt to your hand (initial deal or replacement after a round) */
+  set_cards: { cards: GameCard[] };
+  /** Enemy card slot indices (card details hidden until round_over) */
+  add_enemy_cards: { cards: number[] };
+  /** A new round has begun */
+  start_round: Record<string, never>;
+  /** Cards are now playable — select a card */
+  enable_cards: Record<string, never>;
+  /** A card was removed from the opponent's visible hand */
+  remove_card: { slot: number };
+  /** Server acknowledged your card selection */
+  move_my_card: { slot: number };
+  /** Power card effects applied this round */
+  card_effect: { effects: { effect: number; winner: number }[] };
+  /** Round result — both cards revealed with winner */
+  round_over: RoundResult;
+  /** Element animation played (f=fire, w=water, s=snow) */
+  play_animation: { animation: string; winner: number };
+  /** Game finished — winner seat, winning card UUIDs, and result message */
+  game_won: { winner: number; uuid: string[]; message: string };
 };

@@ -1,6 +1,7 @@
 import { EventEmitter } from "node:events";
 import type { BaseAdapter, ConnectOptions } from "./adapters/base-adapter.js";
 import { type AdapterName, createAdapter } from "./adapters/index.js";
+import { CardJitsu } from "./games/card-jitsu.js";
 import type {
   LoginOptions,
   LoginResult,
@@ -41,6 +42,12 @@ export class Client extends EventEmitter {
   private adapter: BaseAdapter;
   private loginResult: LoginResult | null = null;
   private log: LogFn | null = null;
+  private _cardJitsu: CardJitsu | null = null;
+
+  get cardJitsu(): CardJitsu {
+    if (!this._cardJitsu) this._cardJitsu = new CardJitsu(this.adapter);
+    return this._cardJitsu;
+  }
 
   constructor(server: AdapterName, options?: ClientOptions) {
     super();

@@ -100,6 +100,61 @@ export type Postcard = {
   date: string;
 };
 
+export type NinjaCard = {
+  id: number;
+  powerID: number;
+  element: string;
+  color: string;
+  value: number;
+  quantity: number;
+};
+
+export type NinjaProgress = {
+  rank: number;
+  progress: number;
+};
+
+export type NinjaData = {
+  rank: number;
+  progress: number;
+  fire: NinjaProgress;
+  water: NinjaProgress;
+  cards: NinjaCard[];
+};
+
+export type GameCard = {
+  slot: number;
+  card: number;
+  uuid: string;
+};
+
+export type RevealedCard = {
+  id: number;
+  uuid: string;
+  powerID: number;
+  element: string;
+  color: string;
+  value: number;
+};
+
+export type RoundResult = {
+  seat0card: RevealedCard;
+  seat1card: RevealedCard;
+  winner: number;
+};
+
+export type GamePlayer = {
+  seat: number;
+  colour: number;
+  name: string;
+  belt: number;
+  /** Sensei match flag — msgpack ext type, null when not a sensei game */
+  sensei: unknown;
+};
+
+/** State of all mats in the Dojo. Keys are mat IDs (e.g. "200"), values are seat arrays with player usernames or null. */
+export type MatState = Record<string, (string | null)[]>;
+
 export type Mascot = {
   id: number;
   name: string;

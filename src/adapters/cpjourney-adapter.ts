@@ -369,6 +369,38 @@ export class CpjourneyAdapter extends BaseAdapter {
     this.send("collect_stamp", { stamp });
   }
 
+  override getNinja(): void {
+    this.send("get_ninja", {});
+  }
+
+  override getMats(): void {
+    this.send("get_waddles", {});
+  }
+
+  override joinMatchmaking(): void {
+    this.send("join_matchmaking", {});
+  }
+
+  override leaveMatchmaking(): void {
+    this.send("leave_matchmaking", {});
+  }
+
+  override startGame(): void {
+    this.send("start_game", {});
+  }
+
+  override selectCard(slot: number): void {
+    this.send("select_card", { slot });
+  }
+
+  override loadAnimation(animation: string): void {
+    this.send("load_animation", { animation });
+  }
+
+  override joinMat(waddle: number): void {
+    this.send("join_waddle", { waddle });
+  }
+
   private createSocket(path: string): Socket {
     return io(BASE_URL, {
       path,

@@ -225,6 +225,10 @@ export type ServerMessages = {
   close_with_error: {
     error: string;
   };
+  unknown_packet: {
+    action: string;
+    args: Record<string, unknown>;
+  };
   disconnect: undefined;
   /** Ninja rank, progress, and full card deck */
   get_ninja: NinjaData;

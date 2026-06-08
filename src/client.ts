@@ -487,6 +487,7 @@ export class Client extends EventEmitter {
       }
       default: {
         this.log?.(`[${action}]`, JSON.stringify(args));
+        this.emit("unknown_packet", { action, args });
         break;
       }
     }

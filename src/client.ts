@@ -28,6 +28,7 @@ const KNOWN_ACTIONS = new Set<string>([
 	"buddy_request_seen", "get_buddy", "send_postcard", "stamps_result",
 	"ignore_add", "ignore_remove", "add_item", "get_postcards",
 	"get_igloo_open", "get_mascots", "wait_queue_update", "slot",
+	"snowball", "send_safe", "stop_walking", "update_table",
 	"disconnect", "unknown_packet",
 ]);
 

@@ -225,6 +225,14 @@ export type ServerMessages = {
   close_with_error: {
     error: string;
   };
+  /** Server broadcast: a snowball was thrown */
+  snowball: { id: number; x: number; y: number };
+  /** Server broadcast: a safe-chat phrase was sent */
+  send_safe: { id: number; safe: number };
+  /** A puffle stopped walking with a player */
+  stop_walking: { user: number; puffle: { type: number; id: number } };
+  /** A player sat at or left a minigame table */
+  update_table: { table: number; seat: number; username?: string | null };
   unknown_packet: {
     action: string;
     args: Record<string, unknown>;

@@ -12,6 +12,25 @@ import type {
 import type { ServerMessages } from "./types/message-types.js";
 import type { PlayerData, RoomUser } from "./types/player-types.js";
 
+/** Actions with explicit switch-case handling or typed in ServerMessages — not truly unknown. */
+const KNOWN_ACTIONS = new Set<string>([
+	// Handled in switch
+	"load_player", "join_room", "add_player", "remove_player",
+	"send_position", "send_frame", "update_player", "kick", "close_with_error",
+	// Typed passthrough (emitted as-is, no state updates needed)
+	"send_message", "send_emote", "cpj_ping", "open_sprite", "close_sprite",
+	"set_weather", "server_error", "error", "stamp_earned", "game_over",
+	"join_game_room", "get_ninja", "get_waddles", "update_waddle",
+	"join_matchmaking", "tick_matchmaking", "start_game", "set_cards",
+	"add_enemy_cards", "start_round", "enable_cards", "remove_card",
+	"move_my_card", "card_effect", "round_over", "play_animation", "game_won",
+	"get_player", "buddy_request", "buddy_accept", "buddy_reject",
+	"buddy_request_seen", "get_buddy", "send_postcard", "stamps_result",
+	"ignore_add", "ignore_remove", "add_item", "get_postcards",
+	"get_igloo_open", "get_mascots", "wait_queue_update", "slot",
+	"disconnect", "unknown_packet",
+]);
+
 type ServerMessageHandler<K extends keyof ServerMessages> = (
   args: ServerMessages[K],
 ) => void;
@@ -486,8 +505,10 @@ export class Client extends EventEmitter {
         break;
       }
       default: {
-        this.log?.(`[${action}]`, JSON.stringify(args));
-        this.emit("unknown_packet", { action, args });
+        if (!KNOWN_ACTIONS.has(action)) {
+          this.log?.(`[unknown_packet]`, action, JSON.stringify(args));
+          this.emit("unknown_packet", { action, args });
+        }
         break;
       }
     }

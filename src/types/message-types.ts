@@ -233,6 +233,8 @@ export type ServerMessages = {
   stop_walking: { user: number; puffle: { type: number; id: number } };
   /** A player sat at or left a minigame table */
   update_table: { table: number; seat: number; username?: string | null };
+  /** A player equipped or removed a transformation costume (0 = reverted to normal) */
+  transform_player: { id: number; transform: number };
   unknown_packet: {
     action: string;
     args: Record<string, unknown>;

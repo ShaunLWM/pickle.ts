@@ -4,3 +4,5 @@ dist/
 .env
 AAA---PCS/
 tmp/
+src/bookmarklet/*.min.js
+src/bookmarklet/*.bookmarklet.txt

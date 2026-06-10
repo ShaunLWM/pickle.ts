@@ -99,6 +99,12 @@ export class CpjourneyAdapter extends BaseAdapter {
     loginResult: LoginResult,
     options?: ConnectOptions,
   ): Promise<Socket> {
+    // Queue step on a fresh login socket (matches browser flow).
+    // The original login socket is dead — server disconnects after login response.
+    await this.queueForServer(serverName, options);
+
+    // Connect game socket — still needs game_auth in Node.js
+    // (browser uses cookies from HTTP polling, not available cross-Manager)
     const gameSocket = this.createSocket(`/world/${serverName.toLowerCase()}/`);
     this.socket = gameSocket;
 
@@ -155,6 +161,51 @@ export class CpjourneyAdapter extends BaseAdapter {
     return gameSocket;
   }
 
+  private async queueForServer(
+    serverName: string,
+    options?: ConnectOptions,
+  ): Promise<void> {
+    const queueSocket = this.createSocket("/world/login/");
+
+    await new Promise<void>((resolve, reject) => {
+      const timeout = setTimeout(() => {
+        queueSocket.disconnect();
+        reject(new Error("Queue timed out"));
+      }, 60_000);
+
+      queueSocket.on("connect", () => {
+        queueSocket.emit("message", {
+          action: "queue_server_join",
+          args: { server: serverName },
+        });
+      });
+
+      queueSocket.on("message", (msg: ServerMessage) => {
+        switch (msg.action) {
+          case "wait_queue_update":
+            options?.onQueueUpdate?.(msg.args as QueueUpdate);
+            break;
+          case "queue_server_join":
+            clearTimeout(timeout);
+            queueSocket.disconnect();
+            resolve();
+            break;
+        }
+      });
+
+      queueSocket.once("disconnect", () => {
+        clearTimeout(timeout);
+        resolve();
+      });
+
+      queueSocket.on("connect_error", (err: Error) => {
+        clearTimeout(timeout);
+        queueSocket.disconnect();
+        reject(new Error(`Queue connection failed: ${err.message}`));
+      });
+    });
+  }
+
   send(action: string, args: Record<string, unknown>): void {
     if (!this.socket) throw new Error("Not connected");
     this.socket.emit("message", { action, args });
@@ -166,32 +217,20 @@ export class CpjourneyAdapter extends BaseAdapter {
   }
 
   override normalizeUser(raw: Record<string, unknown>): RoomUser {
+    const { id, username, displayName, joinTime, x, y, frame, walking,
+      color, head, face, neck, body, hand, feet, flag, photo,
+      ...rest } = raw;
     return {
       ...this.extractAppearance(raw),
-      id: raw.id as number,
-      username: raw.username as string,
-      displayName: raw.displayName as string | undefined,
-      joinTime: raw.joinTime as string | undefined,
-      x: (raw.x as number) ?? 0,
-      y: (raw.y as number) ?? 0,
-      frame: (raw.frame as number) ?? 0,
-      walking: raw.walking as number | undefined,
-      meta: {
-        hat: raw.hat,
-        face_mask: raw.face_mask,
-        neck_scarf: raw.neck_scarf,
-        body_shirt: raw.body_shirt,
-        hand_glove: raw.hand_glove,
-        transform: raw.transform,
-        walkingPuffleType: raw.walkingPuffleType,
-        openSprite: raw.openSprite,
-        mascotGiveaway: raw.mascotGiveaway,
-        iglooOpen: raw.iglooOpen,
-        iglooBounds: raw.iglooBounds,
-        igloo_slot: raw.igloo_slot,
-        currentLayer: raw.currentLayer,
-        fireRank: raw.fireRank,
-      },
+      id: id as number,
+      username: username as string,
+      displayName: displayName as string | undefined,
+      joinTime: joinTime as string | undefined,
+      x: (x as number) ?? 0,
+      y: (y as number) ?? 0,
+      frame: (frame as number) ?? 0,
+      walking: walking as number | undefined,
+      meta: rest,
       _raw: raw,
     };
   }
@@ -199,33 +238,21 @@ export class CpjourneyAdapter extends BaseAdapter {
   override normalizePlayer(raw: Record<string, unknown>): PlayerData {
     const user = raw.user as Record<string, unknown>;
     const normalized = this.normalizeUser(user);
+    const { user: _user, coins, rank, inventory, furniture, flooring,
+      buddies, buddyRequests, ignores, igloos, ...rest } = raw;
     return {
       ...normalized,
       _raw: raw,
-      coins: (raw.coins as number) ?? 0,
-      rank: (raw.rank as number) ?? 0,
-      inventory: (raw.inventory as number[]) ?? [],
-      furniture: (raw.furniture as unknown[]) ?? [],
-      flooring: (raw.flooring as unknown[]) ?? [],
+      coins: (coins as number) ?? 0,
+      rank: (rank as number) ?? 0,
+      inventory: (inventory as number[]) ?? [],
+      furniture: (furniture as unknown[]) ?? [],
+      flooring: (flooring as unknown[]) ?? [],
       buddies: (user.buddies as Buddy[]) ?? [],
       buddyRequests: (user.buddyRequests as number[]) ?? [],
       ignores: (user.ignores as number[]) ?? [],
-      igloos: (user.igloos as unknown[]) ?? [],
-      meta: {
-        ...normalized.meta,
-        settings: user.settings,
-        puffleInventory: raw.puffleInventory ?? user.puffleInventory,
-        partyCoins: raw.partyCoins ?? user.partyCoins,
-        gems: raw.gems ?? user.gems,
-        streamer: raw.streamer ?? user.streamer,
-        username_verified: raw.username_verified ?? user.username_verified,
-        email_verified: raw.email_verified ?? user.email_verified,
-        inf_skill_points: raw.inf_skill_points ?? user.inf_skill_points,
-        highest_floor_reached:
-          raw.highest_floor_reached ?? user.highest_floor_reached,
-        towerMeters: raw.towerMeters ?? user.towerMeters,
-        towerExperience: raw.towerExperience ?? user.towerExperience,
-      },
+      igloos: (igloos as unknown[]) ?? [],
+      meta: { ...normalized.meta, ...rest },
     };
   }
 

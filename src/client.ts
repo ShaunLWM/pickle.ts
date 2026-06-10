@@ -29,6 +29,7 @@ const KNOWN_ACTIONS = new Set<string>([
 	"ignore_add", "ignore_remove", "add_item", "get_postcards",
 	"get_igloo_open", "get_mascots", "wait_queue_update", "slot",
 	"snowball", "send_safe", "stop_walking", "update_table", "transform_player",
+	"queue_server_join",
 	"disconnect", "unknown_packet",
 ]);
 

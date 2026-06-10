@@ -50,6 +50,7 @@ export type ClientMessages = {
   get_weather: Record<string, never>;
   join_server: Record<string, never>;
   check_puffle_sprite: { puffleSprite: unknown };
+  queue_server_join: { server: string };
   /** Fetch ninja rank, progress, and card deck */
   get_ninja: Record<string, never>;
   /** Fetch state of all Dojo mats (wire: get_waddles) */
@@ -140,6 +141,7 @@ export type ServerMessages = {
   close_sprite: {
     id: number;
   };
+  queue_server_join: Record<string, never>;
   wait_queue_update: QueueUpdate;
   cpj_ping: Record<string, never>;
   get_mascots: {

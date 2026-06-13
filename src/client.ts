@@ -27,7 +27,7 @@ const KNOWN_ACTIONS = new Set<string>([
 	"get_player", "buddy_request", "buddy_accept", "buddy_reject",
 	"buddy_request_seen", "get_buddy", "send_postcard", "stamps_result",
 	"ignore_add", "ignore_remove", "add_item", "get_postcards",
-	"get_igloo_open", "get_igloos", "get_igloo_likes", "join_igloo",
+	"get_igloo_open", "get_igloos", "get_igloo_likes", "join_igloo", "get_puffles",
 	"get_mascots", "wait_queue_update", "slot",
 	"snowball", "send_safe", "stop_walking", "update_table", "transform_player",
 	"queue_server_join",
@@ -389,6 +389,10 @@ export class Client extends EventEmitter {
   getIgloos(): Promise<ServerMessages["get_igloos"]> {
     this.adapter.getIgloos();
     return this.waitFor("get_igloos");
+  }
+  getPuffles(userId: number): Promise<ServerMessages["get_puffles"]> {
+    this.adapter.getPuffles(userId);
+    return this.waitFor("get_puffles");
   }
   getIglooLikes(): Promise<ServerMessages["get_igloo_likes"]> {
     this.adapter.getIglooLikes();

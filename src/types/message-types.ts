@@ -34,6 +34,7 @@ export type ClientMessages = {
   get_postcards: Record<string, never>;
   get_igloo_open: { igloo: number };
   get_igloos: Record<string, never>;
+  get_puffles: { userId: number };
   get_igloo_likes: Record<string, never>;
   join_igloo: { igloo: number; x?: number; y?: number };
   update_color: { item: number };
@@ -237,6 +238,10 @@ export type ServerMessages = {
       depth: number;
       slot: number;
     }>;
+  };
+  get_puffles: {
+    userId: number;
+    puffles: { id: number; type: number }[];
   };
   update_player: {
     id: number;

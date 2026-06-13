@@ -184,6 +184,10 @@ export abstract class BaseAdapter {
     throw new Error("Not implemented: getIgloos");
   }
 
+  getPuffles(_userId: number): void {
+    throw new Error("Not implemented: getPuffles");
+  }
+
   getIglooLikes(): void {
     throw new Error("Not implemented: getIglooLikes");
   }

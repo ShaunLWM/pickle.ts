@@ -27,7 +27,8 @@ const KNOWN_ACTIONS = new Set<string>([
 	"get_player", "buddy_request", "buddy_accept", "buddy_reject",
 	"buddy_request_seen", "get_buddy", "send_postcard", "stamps_result",
 	"ignore_add", "ignore_remove", "add_item", "get_postcards",
-	"get_igloo_open", "get_mascots", "wait_queue_update", "slot",
+	"get_igloo_open", "get_igloos", "get_igloo_likes", "join_igloo",
+	"get_mascots", "wait_queue_update", "slot",
 	"snowball", "send_safe", "stop_walking", "update_table", "transform_player",
 	"queue_server_join",
 	"disconnect", "unknown_packet",
@@ -385,13 +386,21 @@ export class Client extends EventEmitter {
     this.adapter.getIglooOpen(igloo);
     return this.waitFor("get_igloo_open");
   }
+  getIgloos(): Promise<ServerMessages["get_igloos"]> {
+    this.adapter.getIgloos();
+    return this.waitFor("get_igloos");
+  }
+  getIglooLikes(): Promise<ServerMessages["get_igloo_likes"]> {
+    this.adapter.getIglooLikes();
+    return this.waitFor("get_igloo_likes");
+  }
   joinIgloo(
     igloo: number,
     x?: number,
     y?: number,
-  ): Promise<ServerMessages["join_room"]> {
+  ): Promise<ServerMessages["join_igloo"]> {
     this.adapter.joinIgloo(igloo, x, y);
-    return this.waitFor("join_room");
+    return this.waitFor("join_igloo");
   }
   gameOver(coins: number): Promise<ServerMessages["game_over"]> {
     this.adapter.gameOver(coins);
@@ -482,6 +491,21 @@ export class Client extends EventEmitter {
         if (user) {
           user.frame = args.frame as number;
         }
+        break;
+      }
+      case "join_igloo": {
+        const igloo = args.igloo as number;
+        const rawUsers = args.users as Record<string, unknown>[];
+        this.room = igloo;
+        this.users.clear();
+        const iglooUsers: RoomUser[] = [];
+        for (const rawUser of rawUsers) {
+          const user = this.adapter.normalizeUser(rawUser);
+          this.users.set(user.id, user);
+          iglooUsers.push(user);
+        }
+        emitArgs = { ...args, users: iglooUsers };
+        this.log?.("[join_igloo]", `igloo=${igloo}`, `users=${iglooUsers.length}`);
         break;
       }
       case "update_player": {

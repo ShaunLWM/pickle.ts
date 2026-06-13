@@ -384,6 +384,14 @@ export class CpjourneyAdapter extends BaseAdapter {
     this.send("get_igloo_open", { igloo });
   }
 
+  override getIgloos(): void {
+    this.send("get_igloos", {});
+  }
+
+  override getIglooLikes(): void {
+    this.send("get_igloo_likes", {});
+  }
+
   override joinIgloo(igloo: number, x?: number, y?: number): void {
     this.send("join_igloo", { igloo, x: x ?? 0, y: y ?? 0 });
   }

@@ -180,6 +180,14 @@ export abstract class BaseAdapter {
     throw new Error("Not implemented: getIglooOpen");
   }
 
+  getIgloos(): void {
+    throw new Error("Not implemented: getIgloos");
+  }
+
+  getIglooLikes(): void {
+    throw new Error("Not implemented: getIglooLikes");
+  }
+
   joinIgloo(_igloo: number, _x?: number, _y?: number): void {
     throw new Error("Not implemented: joinIgloo");
   }

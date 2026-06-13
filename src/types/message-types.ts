@@ -33,6 +33,8 @@ export type ClientMessages = {
   get_stamps: { userId: number };
   get_postcards: Record<string, never>;
   get_igloo_open: { igloo: number };
+  get_igloos: Record<string, never>;
+  get_igloo_likes: Record<string, never>;
   join_igloo: { igloo: number; x?: number; y?: number };
   update_color: { item: number };
   update_head: { item: number };
@@ -211,6 +213,30 @@ export type ServerMessages = {
   };
   get_igloo_open: {
     open: boolean;
+  };
+  get_igloos: {
+    igloos: Array<{ id: number; username: string; likes: number }>;
+    myIglooLikes: number;
+  };
+  get_igloo_likes: {
+    likes: number;
+  };
+  join_igloo: {
+    igloo: number;
+    users: RoomUser[];
+    type: number;
+    flooring: number;
+    music: number;
+    location: number;
+    furniture: Array<{
+      furnitureId: number;
+      x: number;
+      y: number;
+      rotation: number;
+      frame: number;
+      depth: number;
+      slot: number;
+    }>;
   };
   update_player: {
     id: number;

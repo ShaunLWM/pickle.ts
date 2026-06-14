@@ -52,6 +52,7 @@ export type ClientMessages = {
   get_mascots: Record<string, never>;
   get_weather: Record<string, never>;
   join_server: Record<string, never>;
+  adopt_puffle: { type: number; name: string };
   check_puffle_sprite: { puffleSprite: unknown };
   queue_server_join: { server: string };
   /** Fetch ninja rank, progress, and card deck */
@@ -268,6 +269,14 @@ export type ServerMessages = {
   update_table: { table: number; seat: number; username?: string | null };
   /** A player equipped or removed a transformation costume (0 = reverted to normal) */
   transform_player: { id: number; transform: number };
+  adopt_puffle: {
+    puffle: unknown;
+    coins: number;
+  };
+  /** Generic server info/notification message */
+  info: {
+    message: string;
+  };
   unknown_packet: {
     action: string;
     args: Record<string, unknown>;

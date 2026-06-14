@@ -30,6 +30,7 @@ const KNOWN_ACTIONS = new Set<string>([
 	"get_igloo_open", "get_igloos", "get_igloo_likes", "join_igloo", "get_puffles",
 	"get_mascots", "wait_queue_update", "slot",
 	"snowball", "send_safe", "stop_walking", "update_table", "transform_player",
+	"adopt_puffle", "info",
 	"queue_server_join",
 	"disconnect", "unknown_packet",
 ]);
@@ -393,6 +394,10 @@ export class Client extends EventEmitter {
   getPuffles(userId: number): Promise<ServerMessages["get_puffles"]> {
     this.adapter.getPuffles(userId);
     return this.waitFor("get_puffles");
+  }
+  adoptPuffle(type: number, name: string): Promise<ServerMessages["adopt_puffle"]> {
+    this.adapter.adoptPuffle(type, name);
+    return this.waitFor("adopt_puffle");
   }
   getIglooLikes(): Promise<ServerMessages["get_igloo_likes"]> {
     this.adapter.getIglooLikes();

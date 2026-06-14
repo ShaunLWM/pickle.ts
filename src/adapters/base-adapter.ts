@@ -188,6 +188,10 @@ export abstract class BaseAdapter {
     throw new Error("Not implemented: getPuffles");
   }
 
+  adoptPuffle(_type: number, _name: string): void {
+    throw new Error("Not implemented: adoptPuffle");
+  }
+
   getIglooLikes(): void {
     throw new Error("Not implemented: getIglooLikes");
   }

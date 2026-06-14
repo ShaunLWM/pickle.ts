@@ -392,6 +392,10 @@ export class CpjourneyAdapter extends BaseAdapter {
     this.send("get_puffles", { userId });
   }
 
+  override adoptPuffle(type: number, name: string): void {
+    this.send("adopt_puffle", { type, name });
+  }
+
   override getIglooLikes(): void {
     this.send("get_igloo_likes", {});
   }

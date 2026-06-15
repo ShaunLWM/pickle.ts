@@ -400,6 +400,10 @@ export class CpjourneyAdapter extends BaseAdapter {
     this.send("get_igloo_likes", {});
   }
 
+  override checkPuffleSprite(puffleSprite: boolean): void {
+    this.send("check_puffle_sprite", { puffleSprite });
+  }
+
   override joinIgloo(igloo: number, x?: number, y?: number): void {
     this.send("join_igloo", { igloo, x: x ?? 0, y: y ?? 0 });
   }

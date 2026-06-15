@@ -196,6 +196,10 @@ export abstract class BaseAdapter {
     throw new Error("Not implemented: getIglooLikes");
   }
 
+  checkPuffleSprite(_puffleSprite: boolean): void {
+    throw new Error("Not implemented: checkPuffleSprite");
+  }
+
   joinIgloo(_igloo: number, _x?: number, _y?: number): void {
     throw new Error("Not implemented: joinIgloo");
   }

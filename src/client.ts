@@ -403,6 +403,9 @@ export class Client extends EventEmitter {
     this.adapter.getIglooLikes();
     return this.waitFor("get_igloo_likes");
   }
+  checkPuffleSprite(puffleSprite: boolean): void {
+    this.adapter.checkPuffleSprite(puffleSprite);
+  }
   joinIgloo(
     igloo: number,
     x?: number,

@@ -44,6 +44,7 @@ export type LogFn = (message: string, ...args: unknown[]) => void;
 
 export type ClientOptions = {
   debug?: boolean | LogFn;
+  connectionProfile?: ConnectionProfileInput;
 };
 
 type MessagePayload = {
@@ -84,7 +85,7 @@ export class Client extends EventEmitter {
 
   constructor(server: AdapterName, options?: ClientOptions) {
     super();
-    this.adapter = createAdapter(server);
+    this.adapter = createAdapter(server, options?.connectionProfile);
 
     if (options?.debug) {
       this.log =

@@ -25,6 +25,7 @@ type CrumbsWorlds = Record<string, WorldConfig>;
 
 type LoginResponse = {
   success: boolean;
+  message?: string;
   username: string;
   key: string;
   populations: Record<string, number>;
@@ -217,7 +218,8 @@ export class NewcpAdapter extends BaseAdapter {
           const response = decoded.args as unknown as LoginResponse;
 
           if (!response.success) {
-            reject(new Error("Login failed"));
+            this.loginMessage = response.message ?? null;
+            reject(new Error(response.message ?? "Login failed"));
             return;
           }
 

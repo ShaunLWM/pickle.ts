@@ -15,6 +15,7 @@ const DEFAULT_SECRET = "skip";
 
 type LoginResponse = {
   success: boolean;
+  message?: string;
   username: string;
   key: string;
   populations: Record<string, number>;
@@ -67,7 +68,13 @@ export class CpjourneyAdapter extends BaseAdapter {
         const response = msg.args as LoginResponse;
 
         if (!response.success) {
-          reject(new Error("Login failed"));
+          this.loginMessage = response.message ?? null;
+          if (response.message?.startsWith("Banned:")) {
+            this.loginStatus = "banned";
+          }
+          reject(
+            new Error(response.message ?? "Login failed"),
+          );
           return;
         }
 

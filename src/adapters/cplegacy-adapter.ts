@@ -73,6 +73,7 @@ export class CplegacyAdapter extends BaseAdapter {
     }
 
     if (!data.success) {
+      this.loginMessage = data.message ?? null;
       throw new Error(`Login failed: ${data.message ?? "unknown error"}`);
     }
 

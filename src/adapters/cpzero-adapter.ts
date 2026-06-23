@@ -344,7 +344,7 @@ export class CpzeroAdapter extends BaseAdapter {
       );
     }
 
-    const ws = new WebSocket(LOGIN_WS_URL);
+    const ws = new WebSocket(LOGIN_WS_URL, this.webSocketOptions(LOGIN_WS_URL));
     const result = await new Promise<LoginResult>((resolve, reject) => {
       const timeout = setTimeout(() => {
         ws.close();
@@ -436,7 +436,7 @@ export class CpzeroAdapter extends BaseAdapter {
     const confirmationKey = keyParts[keyParts.length - 1] ?? "";
     const loginKey = nickString.split("|")[3] ?? "";
 
-    const ws = new WebSocket(GAME_WS_URL);
+    const ws = new WebSocket(GAME_WS_URL, this.webSocketOptions(GAME_WS_URL));
     const sfs = new SmartFoxSocket(ws);
     this.sfs = sfs;
     // Store as unknown since SmartFoxSocket is not a Socket.IO Socket

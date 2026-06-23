@@ -46,6 +46,7 @@ Creates a new client instance.
 |---|---|---|
 | `server` | `"CPJourney" \| "CPLegacy"` | CPPS server identifier (strongly typed) |
 | `options.debug` | `boolean \| LogFn` | Enable debug logging. Pass `true` for console.log, or a custom function |
+| `options.connectionProfile` | `"chrome" \| "node" \| ConnectionProfile` | Controls HTTP/WebSocket headers. Defaults to browser-like Chrome headers; use `"node"` to preserve Node defaults |
 
 ```typescript
 // default console.log
@@ -54,6 +55,20 @@ const client = new Client("CPJourney", { debug: true })
 // custom logger
 const client = new Client("CPJourney", {
   debug: (msg, ...args) => myLogger.info(msg, ...args)
+})
+
+// opt out of browser-like headers
+const nodeClient = new Client("CPJourney", {
+  connectionProfile: "node"
+})
+
+// override browser profile fields
+const profiledClient = new Client("CPJourney", {
+  connectionProfile: {
+    userAgent: "Mozilla/5.0 ...",
+    origin: "https://play.cpjourney.net",
+    referer: "https://play.cpjourney.net/"
+  }
 })
 ```
 

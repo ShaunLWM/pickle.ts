@@ -1,6 +1,7 @@
 import { EventEmitter } from "node:events";
 import type { BaseAdapter, ConnectOptions } from "./adapters/base-adapter.js";
 import { type AdapterName, createAdapter } from "./adapters/index.js";
+import type { ConnectionProfileInput } from "./connection-profile.js";
 import { CardJitsu } from "./games/card-jitsu.js";
 import type {
   LoginOptions,
@@ -66,6 +67,14 @@ export class Client extends EventEmitter {
   private loginResult: LoginResult | null = null;
   private log: LogFn | null = null;
   private _cardJitsu: CardJitsu | null = null;
+
+  get loginMessage(): string | null {
+    return this.adapter.loginMessage;
+  }
+
+  get loginStatus(): "active" | "banned" {
+    return this.adapter.loginStatus;
+  }
 
   get cardJitsu(): CardJitsu {
     if (!this._cardJitsu)
@@ -395,7 +404,10 @@ export class Client extends EventEmitter {
     this.adapter.getPuffles(userId);
     return this.waitFor("get_puffles");
   }
-  adoptPuffle(type: number, name: string): Promise<ServerMessages["adopt_puffle"]> {
+  adoptPuffle(
+    type: number,
+    name: string,
+  ): Promise<ServerMessages["adopt_puffle"]> {
     this.adapter.adoptPuffle(type, name);
     return this.waitFor("adopt_puffle");
   }

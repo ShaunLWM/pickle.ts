@@ -12,6 +12,7 @@ import { BaseAdapter, type ConnectOptions } from "./base-adapter.js";
 
 const LOGIN_URL = "https://api.cplegacy.com/login";
 const TOKEN_LOGIN_URL = "https://api.cplegacy.com/token_login";
+const BROWSER_ORIGIN = "https://play.cplegacy.com";
 
 type LoginResponse = {
   success: boolean;
@@ -95,6 +96,7 @@ export class CplegacyAdapter extends BaseAdapter {
   ): Promise<Socket> {
     const wsUrl = `wss://${serverName.toLowerCase()}.server.cplegacy.com`;
     const rawSocket = io(wsUrl, {
+      ...this.socketIoOptions(BROWSER_ORIGIN),
       path: "/socket.io/",
       parser: msgpackParser,
       transports: ["websocket"],
@@ -336,10 +338,10 @@ export class CplegacyAdapter extends BaseAdapter {
   ): Promise<LoginResponse> {
     const resp = await fetch(url, {
       method: "POST",
-      headers: {
+      headers: this.connectionHeaders(BROWSER_ORIGIN, {
         "Content-Type": "application/json",
         Accept: "application/json",
-      },
+      }),
       body: JSON.stringify(body),
     });
 

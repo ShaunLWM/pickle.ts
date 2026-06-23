@@ -1,6 +1,11 @@
 export { BaseAdapter, type ConnectOptions } from "./adapters/base-adapter.js";
 export type { AdapterName } from "./adapters/index.js";
 export { Client, type ClientOptions, type LogFn } from "./client.js";
+export type {
+  ConnectionProfile,
+  ConnectionProfileInput,
+  ConnectionProfilePreset,
+} from "./connection-profile.js";
 export { CardJitsu } from "./games/card-jitsu.js";
 export type {
   LoginOptions,

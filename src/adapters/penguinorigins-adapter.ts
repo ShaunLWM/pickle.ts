@@ -293,6 +293,7 @@ export class PenguinoriginsAdapter extends BaseAdapter {
 
   private createSocket(path: string): Socket {
     return io(BASE_URL, {
+      ...this.socketIoOptions(BASE_URL),
       path,
       transports: ["polling", "websocket"],
       reconnection: false,

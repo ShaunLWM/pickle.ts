@@ -450,6 +450,7 @@ export class CpjourneyAdapter extends BaseAdapter {
 
   private createSocket(path: string): Socket {
     return io(BASE_URL, {
+      ...this.socketIoOptions(BASE_URL),
       path,
       parser: msgpackParser,
       transports: ["polling", "websocket"],

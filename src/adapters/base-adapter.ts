@@ -1,4 +1,11 @@
-import type { Socket } from "socket.io-client";
+import type { ManagerOptions, Socket, SocketOptions } from "socket.io-client";
+import {
+  buildConnectionHeaders,
+  type HeaderBag,
+  type NormalizedConnectionProfile,
+  resolveConnectionOrigin,
+  resolveConnectionProfile,
+} from "../connection-profile.js";
 import type {
   LoginOptions,
   LoginResult,
@@ -11,6 +18,11 @@ import type {
   RoomUser,
 } from "../types/player-types.js";
 
+type SocketIoConnectionOptions = Partial<ManagerOptions & SocketOptions> & {
+  extraHeaders?: Record<string, string>;
+  origin?: string;
+};
+
 export type ConnectOptions = {
   onQueueUpdate?: (update: QueueUpdate) => void;
 };
@@ -18,6 +30,12 @@ export type ConnectOptions = {
 export abstract class BaseAdapter {
   abstract readonly id: string;
   protected socket: Socket | null = null;
+  loginMessage: string | null = null;
+  loginStatus: "active" | "banned" = "active";
+
+  constructor(
+    protected readonly connectionProfile: NormalizedConnectionProfile = resolveConnectionProfile(),
+  ) {}
 
   abstract login(
     options: LoginOptions | TokenLoginOptions,
@@ -29,6 +47,48 @@ export abstract class BaseAdapter {
   ): Promise<Socket>;
   abstract disconnect(): void;
   abstract send(action: string, args: Record<string, unknown>): void;
+
+  protected socketIoOptions(
+    defaultUrlOrOrigin: string,
+  ): SocketIoConnectionOptions {
+    const headers = this.connectionHeaders(defaultUrlOrOrigin);
+    const origin = this.connectionOrigin(defaultUrlOrOrigin);
+    const options: SocketIoConnectionOptions = {};
+
+    if (Object.keys(headers).length > 0) options.extraHeaders = headers;
+    if (origin) options.origin = origin;
+    if (this.connectionProfile.preset !== "node" || origin) {
+      options.withCredentials = true;
+    }
+
+    return options;
+  }
+
+  protected webSocketOptions(defaultUrlOrOrigin: string): {
+    headers?: Record<string, string>;
+    origin?: string;
+  } {
+    const headers = this.connectionHeaders(defaultUrlOrOrigin);
+    const origin = this.connectionOrigin(defaultUrlOrOrigin);
+    return {
+      ...(Object.keys(headers).length > 0 ? { headers } : {}),
+      ...(origin ? { origin } : {}),
+    };
+  }
+
+  protected connectionHeaders(
+    defaultUrlOrOrigin: string,
+    headers?: HeaderBag,
+  ): Record<string, string> {
+    return buildConnectionHeaders(this.connectionProfile, {
+      defaultOrigin: defaultUrlOrOrigin,
+      headers,
+    });
+  }
+
+  protected connectionOrigin(defaultUrlOrOrigin: string): string | undefined {
+    return resolveConnectionOrigin(this.connectionProfile, defaultUrlOrOrigin);
+  }
 
   normalizeUser(_raw: Record<string, unknown>): RoomUser {
     throw new Error("Not implemented: normalizeUser");

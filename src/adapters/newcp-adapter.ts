@@ -489,6 +489,7 @@ export class NewcpAdapter extends BaseAdapter {
 
   private createSocket(host: string, path: string): Socket {
     return io(host, {
+      ...this.socketIoOptions(host),
       path,
       transports: ["polling", "websocket"],
       reconnection: false,
@@ -496,7 +497,9 @@ export class NewcpAdapter extends BaseAdapter {
   }
 
   private async loadWorlds(): Promise<void> {
-    const resp = await fetch(CRUMBS_URL);
+    const resp = await fetch(CRUMBS_URL, {
+      headers: this.connectionHeaders(CRUMBS_URL),
+    });
     if (!resp.ok) throw new Error(`Failed to fetch crumbs: ${resp.status}`);
     const crumbs = (await resp.json()) as { worlds: CrumbsWorlds };
     this.worlds = crumbs.worlds;

@@ -224,9 +224,26 @@ export class CpjourneyAdapter extends BaseAdapter {
   }
 
   override normalizeUser(raw: Record<string, unknown>): RoomUser {
-    const { id, username, displayName, joinTime, x, y, frame, walking,
-      color, head, face, neck, body, hand, feet, flag, photo,
-      ...rest } = raw;
+    const {
+      id,
+      username,
+      displayName,
+      joinTime,
+      x,
+      y,
+      frame,
+      walking,
+      color,
+      head,
+      face,
+      neck,
+      body,
+      hand,
+      feet,
+      flag,
+      photo,
+      ...rest
+    } = raw;
     return {
       ...this.extractAppearance(raw),
       id: id as number,
@@ -245,8 +262,19 @@ export class CpjourneyAdapter extends BaseAdapter {
   override normalizePlayer(raw: Record<string, unknown>): PlayerData {
     const user = raw.user as Record<string, unknown>;
     const normalized = this.normalizeUser(user);
-    const { user: _user, coins, rank, inventory, furniture, flooring,
-      buddies, buddyRequests, ignores, igloos, ...rest } = raw;
+    const {
+      user: _user,
+      coins,
+      rank,
+      inventory,
+      furniture,
+      flooring,
+      buddies,
+      buddyRequests,
+      ignores,
+      igloos,
+      ...rest
+    } = raw;
     return {
       ...normalized,
       _raw: raw,

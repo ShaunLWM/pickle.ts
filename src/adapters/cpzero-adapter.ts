@@ -4,6 +4,7 @@ import WebSocket from "ws";
 import type {
   LoginOptions,
   LoginResult,
+  ServerInfo,
   TokenLoginOptions,
 } from "../types/adapter-types.js";
 import type { PlayerData, RoomUser } from "../types/player-types.js";
@@ -11,6 +12,7 @@ import { BaseAdapter, type ConnectOptions } from "./base-adapter.js";
 
 const LOGIN_WS_URL = "wss://server.cpzero.net/login";
 const GAME_WS_URL = "wss://server.cpzero.net/sub_zero";
+const SERVERS_XML_URL = "https://play.cpzero.net/servers.xml";
 const API_VERSION = "253";
 const LOGIN_ZONE = "w1";
 const NUL = "\0";
@@ -344,6 +346,9 @@ export class CpzeroAdapter extends BaseAdapter {
       );
     }
 
+    // Fetch server name mapping in parallel with the WS login handshake
+    const serverNameMapPromise = fetchServerNameMap();
+
     const ws = new WebSocket(LOGIN_WS_URL, this.webSocketOptions(LOGIN_WS_URL));
     const result = await new Promise<LoginResult>((resolve, reject) => {
       const timeout = setTimeout(() => {
@@ -351,13 +356,11 @@ export class CpzeroAdapter extends BaseAdapter {
         reject(new Error("Login timed out"));
       }, 15_000);
 
-      let _rndK = "";
-
       ws.on("open", () => {
         ws.send(xmlMsg("verChk", "0", `<ver v='${API_VERSION}' />`) + NUL);
       });
 
-      ws.on("message", (raw: Buffer) => {
+      ws.on("message", async (raw: Buffer) => {
         const messages = raw.toString("utf-8").split(NUL).filter(Boolean);
         for (const msg of messages) {
           if (
@@ -370,26 +373,31 @@ export class CpzeroAdapter extends BaseAdapter {
 
           const kMatch = msg.match(/<k>(.*?)<\/k>/);
           if (kMatch) {
-            _rndK = kMatch[1];
             const loginXml = xmlLogin(options.username, loginHash);
             ws.send(loginXml + NUL);
             continue;
           }
 
           if (msg.startsWith("%xt%l%")) {
-            const xtParts = msg.split("%").filter(Boolean);
-            // xt, l, -1, nickString, confirmationKey, ...
-            const nickString = xtParts[3] ?? "";
-            const confirmationKey = xtParts[4] ?? "";
+            // Split without filtering to preserve empty segments from %%
+            // Format: %xt%l%-1%<nick>%<confirmKey>%%<populations>%%<email>%
+            const rawParts = msg.split("%");
+            // rawParts: ["", "xt", "l", "-1", nick, confirmKey, "", popData, "", email, ""]
+            const nickString = rawParts[4] ?? "";
+            const confirmationKey = rawParts[5] ?? "";
+            const popDataRaw = rawParts[7] ?? "";
             const nickFields = nickString.split("|");
 
             clearTimeout(timeout);
             ws.close();
 
+            const serverNameMap = await serverNameMapPromise;
+            const servers = parseServerPopulations(popDataRaw, serverNameMap);
+
             const userId = int(nickFields[0]);
             const username = nickFields[2] ?? options.username;
             resolve({
-              servers: [{ name: "Sub Zero", population: 0 }],
+              servers,
               key: `${userId}|${nickString}|${confirmationKey}`,
               username,
               moderator: false,
@@ -744,4 +752,52 @@ function actionToXt(
     default:
       return null;
   }
+}
+
+/**
+ * Fetch server ID → name mapping from the CPZero servers.xml endpoint.
+ * Returns an empty map on failure so login can still proceed with fallback names.
+ */
+async function fetchServerNameMap(): Promise<Map<string, string>> {
+  const map = new Map<string, string>();
+  try {
+    const resp = await fetch(SERVERS_XML_URL);
+    if (!resp.ok) return map;
+    const xml = await resp.text();
+    // Only parse servers under <language locale="en">
+    const enBlock = xml.match(
+      /<language\s+locale="en">([\s\S]*?)<\/language>/,
+    )?.[1];
+    if (!enBlock) return map;
+    for (const m of enBlock.matchAll(/<server\s([^>]+)>/g)) {
+      const attrs = m[1];
+      const id = attrs.match(/id="(\d+)"/)?.[1];
+      const name = attrs.match(/name="([^"]+)"/)?.[1];
+      if (id && name) map.set(id, name);
+    }
+  } catch {
+    // Non-fatal — server names will fall back to "Server {id}"
+  }
+  return map;
+}
+
+/**
+ * Parse the population segment from the login response.
+ * Format: "3100,0|3101,0|3103,7|3102,0|3104,7"
+ */
+function parseServerPopulations(
+  raw: string,
+  nameMap: Map<string, string>,
+): ServerInfo[] {
+  if (!raw) return [];
+  return raw
+    .split("|")
+    .filter(Boolean)
+    .map((entry) => {
+      const [id, pop] = entry.split(",");
+      return {
+        name: nameMap.get(id) ?? `Server ${id}`,
+        population: int(pop),
+      };
+    });
 }

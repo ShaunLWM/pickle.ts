@@ -53,7 +53,24 @@ export type RoomUser = PlayerAppearance & {
   x: number;
   y: number;
   frame: number;
-  /** Adapter-specific extras. See each adapter's normalizeUser for keys. */
+  /**
+   * Adapter-specific extras. See each adapter's normalizeUser for keys.
+   *
+   * **CPJourney** overlay appearance slots (number):
+   * `hat`, `face_mask`, `neck_scarf`, `body_shirt`, `hand_glove`
+   *
+   * **CPJourney** user state:
+   * `transform` (number) — costume ID, 0 = none
+   * `walkingPuffleType` (number | null) — puffle species
+   * `openSprite` (string | null) — sprite state e.g. "1_3"
+   * `mascotGiveaway` (number | null) — non-null = mascot, value = giveaway item ID
+   * `iglooOpen` (number) — 0/1
+   * `iglooBounds` (number) — 0/1
+   * `igloo_slot` (number) — active igloo slot
+   * `currentLayer` (number) — rendering layer
+   * `fireRank` (number) — fire ninja rank 0–5
+   * `isInvisible` (boolean) — mascot visibility flag
+   */
   meta: Record<string, unknown>;
   /** Original unnormalized server response */
   _raw: Record<string, unknown>;

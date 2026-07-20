@@ -2,7 +2,7 @@
 
 Type-safe client library for Club Penguin Private Servers.
 
-Built with TypeScript, Socket.IO, and msgpack. Supports multiple CPPS backends through an adapter pattern — ships with CPJourney and CPLegacy support.
+Built with TypeScript, Socket.IO, and msgpack. Supports CPJourney, CPLegacy, NewCP, and PenguinOrigins through an adapter pattern.
 
 ## Install
 
@@ -13,7 +13,7 @@ npm install @shaunlwm/pickle.ts
 ## Quick Start
 
 ```typescript
-import { Client } from "pickle.ts"
+import { Client } from "@shaunlwm/pickle.ts"
 
 const client = new Client("CPJourney")
 
@@ -44,7 +44,7 @@ Creates a new client instance.
 
 | Param | Type | Description |
 |---|---|---|
-| `server` | `"CPJourney" \| "CPLegacy"` | CPPS server identifier (strongly typed) |
+| `server` | `"CPJourney" \| "CPLegacy" \| "NewCP" \| "PenguinOrigins"` | CPPS server identifier (strongly typed) |
 | `options.debug` | `boolean \| LogFn` | Enable debug logging. Pass `true` for console.log, or a custom function |
 | `options.connectionProfile` | `"chrome" \| "node" \| ConnectionProfile` | Controls HTTP/WebSocket headers. Defaults to browser-like Chrome headers; use `"node"` to preserve Node defaults |
 
@@ -72,7 +72,7 @@ const profiledClient = new Client("CPJourney", {
 })
 ```
 
-### `client.login(options)`
+### `client.login(options, operationOptions?)`
 
 Authenticates and returns the server list with populations.
 
@@ -80,6 +80,9 @@ Authenticates and returns the server list with populations.
 const servers = await client.login({
   username: "user",
   password: "pass",
+}, {
+  timeoutMs: 20_000,
+  signal: abortController.signal,
 })
 // servers: ServerInfo[] = [{ name: string, population: number }]
 ```
@@ -109,6 +112,28 @@ await client.connect("Blizzard", {
 ```
 
 After `connect()` resolves, `client.player`, `client.room`, and `client.users` are populated.
+
+Connection progress can be observed without parsing log strings:
+
+```typescript
+await client.connect("Blizzard", {
+  signal: abortController.signal,
+  timeouts: {
+    transportMs: 20_000,
+    queueMs: 300_000, // maximum silence between queue updates, not total queue time
+    authenticationMs: 20_000,
+    initialStateMs: 15_000,
+  },
+  onLifecycleUpdate: ({ phase, queue }) => {
+    console.log(phase, queue?.position)
+  },
+})
+```
+
+Login, connection, and request failures reject with `ClientOperationError`. Its
+`category`, `phase`, and `retryable` fields are safe for supervisor decisions;
+`unsupported_operation` is always non-retryable. Request methods accept
+`{ timeoutMs, signal }`, defaulting to a 15-second response timeout.
 
 ### State
 
@@ -165,6 +190,25 @@ client.getStamps(userId)           // view stampbook
 client.getIglooOpen(userId)        // check if igloo is open
 client.joinIgloo(userId)           // enter igloo
 
+// CPJourney igloo editor/store
+client.openIglooEditor()
+client.updateIglooFurniture(furniture)
+client.autoUpdateIglooFurniture(furniture)
+client.updateIglooType(typeId)
+await client.updateIglooMusic(musicId)
+await client.buyFurniture(furnitureId, amount)
+await client.buyMusic(musicId)
+client.closeIglooEditor()
+
+// CPJourney puffles
+const { puffles } = await client.getAllPuffles()
+await client.getPuffleWellbeing(puffleId)
+client.playPuffle(puffleId)
+client.restPuffle(puffleId)
+await client.buyPuffleItem(puffleId, itemId)
+await client.walkPuffle(puffleId)
+client.initializePuffleTower() // CPJ sends tower_init after walking acknowledgement
+
 // Animation
 client.sendFrame(frameId)
 
@@ -178,6 +222,13 @@ client.disconnect()
 ### Events
 
 All events are fully typed via `ServerMessages`.
+
+`ServerMessages` remains the compatibility aggregate. CPJourney-specific wire
+contracts are also exported separately as `CpjourneyClientMessages` and
+`CpjourneyServerMessages`; unsupported methods throw or reject with a
+non-retryable `ClientOperationError` whose category is
+`unsupported_operation`. Shared actions should be normalized by each adapter
+rather than assuming identical wire payloads.
 
 ```typescript
 client.on("send_message", ({ id, message }) => {
@@ -233,8 +284,8 @@ client.on("stamps_result", ({ stamps, username }) => {
   console.log(`${username} has ${stamps.length} stamps`)
 })
 
-client.on("disconnect", () => {
-  console.log("Connection lost")
+client.on("disconnect", ({ intentional, reason }) => {
+  console.log(intentional ? "Connection closed" : "Connection lost", reason)
 })
 ```
 
@@ -257,9 +308,13 @@ import type {
   TokenLoginOptions,// username + token login
   LoginResult,      // login response (servers, key, username)
   QueueUpdate,      // queue position update
+  ClientOperationError,
+  ClientOperationOptions,
+  ClientLifecycleUpdate,
+  ClientDisconnectInfo,
   ClientMessages,   // all client -> server message types
   ServerMessages,   // all server -> client message types
-} from "pickle.ts"
+} from "@shaunlwm/pickle.ts"
 ```
 
 ## Custom Adapters
@@ -267,7 +322,7 @@ import type {
 To support a different CPPS, extend `BaseAdapter`:
 
 ```typescript
-import { BaseAdapter } from "pickle.ts"
+import { BaseAdapter } from "@shaunlwm/pickle.ts"
 
 export class MyServerAdapter extends BaseAdapter {
   readonly id = "MyServer"

@@ -114,7 +114,83 @@ export type Postcard = {
   senderId: number;
   postcardId: number;
   extra: string | null;
-  date: string;
+  /** CPJourney MessagePack decodes this as a Date; other adapters may use strings. */
+  date: Date | string;
+};
+
+/** A puffle summary, optionally including CPJourney's full care state. */
+export type Puffle = {
+  id: number;
+  type: number;
+  userId?: number;
+  name?: string;
+  energy?: number;
+  health?: number;
+  rest?: number;
+  experience?: number;
+  level?: number;
+  adoption_date?: Record<string, unknown>;
+  last_feed?: Record<string, unknown>;
+  last_slept?: Record<string, unknown>;
+  postcard_hungry?: boolean;
+  dead?: number;
+  ran_away?: number;
+  last_dig?: number;
+  in_backyard?: number;
+  backyard_supplies?: number;
+  walking?: boolean;
+  backyard?: boolean;
+};
+
+/** CPJourney puffle care values returned by get_wellbeing/update_wellbeing. */
+export type PuffleWellbeing = {
+  puffleId: number;
+  energy: number;
+  health: number;
+  rest: number;
+  name: string;
+  type: number;
+  level: number;
+  experience: number;
+  inBackyard?: number;
+  backyardSupplyCost?: number;
+  backyardSuppliesEmpty?: boolean;
+  backyardPuffleCount?: number;
+};
+
+/** Furniture placement sent by CPJourney's igloo editor. */
+export type IglooFurniturePlacement = {
+  furnitureId: number;
+  x: number;
+  y: number;
+  rotation: number;
+  frame: number;
+  depth: number;
+  /** Present in join_igloo snapshots but omitted by editor updates. */
+  slot?: number;
+};
+
+/** Common CPJourney igloo/music store item fields. */
+export type IglooStoreItem = {
+  id: string;
+  name: string;
+  cost: number;
+  store: number;
+  seasonal: number;
+  new: number;
+  active?: number;
+  patched?: number;
+  timeAdded?: number;
+};
+
+/** CPJourney furniture catalog item fields. */
+export type FurnitureStoreItem = IglooStoreItem & {
+  type: number;
+  sort: number;
+  member: number;
+  bait: number;
+  max: number;
+  fps?: number;
 };
 
 export type NinjaCard = {

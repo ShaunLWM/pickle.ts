@@ -1,27 +1,32 @@
 import type { BaseAdapter } from "../adapters/base-adapter.js";
+import type { ClientOperationOptions } from "../lifecycle.js";
 import type { ServerMessages } from "../types/message-types.js";
 
-type WaitForFn = <K extends keyof ServerMessages>(
+type RequestFn = <K extends keyof ServerMessages>(
   event: K,
-  timeout?: number,
+  send: () => void,
+  options?: ClientOperationOptions,
+  matches?: (args: ServerMessages[K]) => boolean,
 ) => Promise<ServerMessages[K]>;
 
 export class CardJitsu {
   constructor(
     private adapter: BaseAdapter,
-    private waitFor: WaitForFn,
+    private request: RequestFn,
   ) {}
 
   /** Fetch ninja rank, progress, and card deck. Resolves with ninja data. */
-  getNinja(): Promise<ServerMessages["get_ninja"]> {
-    this.adapter.getNinja();
-    return this.waitFor("get_ninja");
+  getNinja(
+    options?: ClientOperationOptions,
+  ): Promise<ServerMessages["get_ninja"]> {
+    return this.request("get_ninja", () => this.adapter.getNinja(), options);
   }
 
   /** Fetch state of all Dojo mats. Resolves with mat state. */
-  getMats(): Promise<ServerMessages["get_waddles"]> {
-    this.adapter.getMats();
-    return this.waitFor("get_waddles");
+  getMats(
+    options?: ClientOperationOptions,
+  ): Promise<ServerMessages["get_waddles"]> {
+    return this.request("get_waddles", () => this.adapter.getMats(), options);
   }
 
   /** Sit on a Dojo mat to wait for an opponent. Listen for `update_waddle` events. */
@@ -30,9 +35,14 @@ export class CardJitsu {
   }
 
   /** Join Sensei matchmaking queue. Resolves when server acknowledges. */
-  joinMatchmaking(): Promise<ServerMessages["join_matchmaking"]> {
-    this.adapter.joinMatchmaking();
-    return this.waitFor("join_matchmaking");
+  joinMatchmaking(
+    options?: ClientOperationOptions,
+  ): Promise<ServerMessages["join_matchmaking"]> {
+    return this.request(
+      "join_matchmaking",
+      () => this.adapter.joinMatchmaking(),
+      options,
+    );
   }
 
   /** Leave Sensei matchmaking queue. */
@@ -41,15 +51,23 @@ export class CardJitsu {
   }
 
   /** Start a Card-Jitsu match after entering a game room. Resolves with player info. */
-  startGame(): Promise<ServerMessages["start_game"]> {
-    this.adapter.startGame();
-    return this.waitFor("start_game");
+  startGame(
+    options?: ClientOperationOptions,
+  ): Promise<ServerMessages["start_game"]> {
+    return this.request("start_game", () => this.adapter.startGame(), options);
   }
 
   /** Play a card from your hand by slot index. Resolves when server acknowledges. */
-  selectCard(slot: number): Promise<ServerMessages["move_my_card"]> {
-    this.adapter.selectCard(slot);
-    return this.waitFor("move_my_card");
+  selectCard(
+    slot: number,
+    options?: ClientOperationOptions,
+  ): Promise<ServerMessages["move_my_card"]> {
+    return this.request(
+      "move_my_card",
+      () => this.adapter.selectCard(slot),
+      options,
+      (response) => response.slot === slot,
+    );
   }
 
   /** Preload a power card animation asset. */

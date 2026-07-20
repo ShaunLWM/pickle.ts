@@ -1,5 +1,10 @@
 import { io, type Socket } from "socket.io-client";
 import msgpackParser from "socket.io-msgpack-parser";
+import { ClientOperationError } from "../errors.js";
+import {
+  type ClientOperationOptions,
+  DEFAULT_CLIENT_CONNECTION_TIMEOUTS,
+} from "../lifecycle.js";
 import type {
   LoginOptions,
   LoginResult,
@@ -12,6 +17,10 @@ import { BaseAdapter, type ConnectOptions } from "./base-adapter.js";
 
 const BASE_URL = "wss://play.cpjourney.net";
 const DEFAULT_SECRET = "skip";
+const INVALID_CREDENTIAL_MESSAGES = new Set([
+  "Penguin not found. Try Again?",
+  "Incorrect password. NOTE: Passwords are CaSe SeNsiTIVE",
+]);
 
 type LoginResponse = {
   success: boolean;
@@ -35,17 +44,56 @@ type ServerMessage = {
 
 export class CpjourneyAdapter extends BaseAdapter {
   readonly id = "CPJourney";
+  private gameToken: string | undefined;
 
-  async login(options: LoginOptions | TokenLoginOptions): Promise<LoginResult> {
+  async login(
+    options: LoginOptions | TokenLoginOptions,
+    operationOptions?: ClientOperationOptions,
+  ): Promise<LoginResult> {
+    this.resetLoginState();
+    this.gameToken = "token" in options ? options.token : undefined;
     const loginSocket = this.createSocket("/world/login/");
 
     const result = await new Promise<LoginResult>((resolve, reject) => {
+      let settled = false;
       const timeout = setTimeout(() => {
-        loginSocket.disconnect();
-        reject(new Error("Login timed out"));
-      }, 10_000);
+        fail(
+          new ClientOperationError({
+            category: "login_timeout",
+            phase: "transport_connecting",
+            retryable: true,
+            message: "Login timed out",
+          }),
+        );
+      }, operationOptions?.timeoutMs ??
+        DEFAULT_CLIENT_CONNECTION_TIMEOUTS.loginMs);
 
-      loginSocket.on("connect", () => {
+      const cleanup = (): void => {
+        clearTimeout(timeout);
+        loginSocket.off("connect", onConnect);
+        loginSocket.off("message", onMessage);
+        loginSocket.off("connect_error", onConnectError);
+        loginSocket.off("disconnect", onDisconnect);
+        operationOptions?.signal?.removeEventListener("abort", onAbort);
+      };
+
+      const fail = (error: ClientOperationError): void => {
+        if (settled) return;
+        settled = true;
+        cleanup();
+        loginSocket.disconnect();
+        reject(error);
+      };
+
+      const succeed = (value: LoginResult): void => {
+        if (settled) return;
+        settled = true;
+        cleanup();
+        loginSocket.disconnect();
+        resolve(value);
+      };
+
+      const onConnect = (): void => {
         const secret = options.secret ?? DEFAULT_SECRET;
         const args =
           "token" in options
@@ -57,23 +105,32 @@ export class CpjourneyAdapter extends BaseAdapter {
               };
 
         loginSocket.emit("message", { action: "login", args });
-      });
+      };
 
-      loginSocket.on("message", (msg: ServerMessage) => {
+      const onMessage = (msg: ServerMessage): void => {
         if (msg.action !== "login") return;
-
-        clearTimeout(timeout);
-        loginSocket.disconnect();
 
         const response = msg.args as LoginResponse;
 
         if (!response.success) {
           this.loginMessage = response.message ?? null;
+          const message = response.message ?? "Login failed";
           if (response.message?.startsWith("Banned:")) {
             this.loginStatus = "banned";
           }
-          reject(
-            new Error(response.message ?? "Login failed"),
+          const invalidCredentials = INVALID_CREDENTIAL_MESSAGES.has(message);
+          fail(
+            new ClientOperationError({
+              category:
+                this.loginStatus === "banned"
+                  ? "account_banned"
+                  : invalidCredentials
+                    ? "invalid_credentials"
+                    : "login_rejected",
+              phase: "transport_connecting",
+              retryable: false,
+              message,
+            }),
           );
           return;
         }
@@ -82,19 +139,60 @@ export class CpjourneyAdapter extends BaseAdapter {
           ([name, population]) => ({ name, population }),
         );
 
-        resolve({
+        succeed({
           servers,
           key: response.key,
           username: response.username,
           moderator: response.moderator,
           buddyWorlds: response.buddyWorlds ?? [],
         });
-      });
+      };
 
-      loginSocket.on("connect_error", (err: Error) => {
-        clearTimeout(timeout);
-        loginSocket.disconnect();
-        reject(new Error(`Login connection failed: ${err.message}`));
+      const onConnectError = (cause: Error): void => {
+        fail(
+          new ClientOperationError({
+            category: "transport_error",
+            phase: "transport_connecting",
+            retryable: true,
+            message: `Login connection failed: ${cause.message}`,
+            cause,
+          }),
+        );
+      };
+
+      const onDisconnect = (reason: string): void => {
+        fail(
+          new ClientOperationError({
+            category: "transport_error",
+            phase: "transport_connecting",
+            retryable: true,
+            message: `Login connection closed unexpectedly${reason ? `: ${reason}` : ""}`,
+          }),
+        );
+      };
+
+      const onAbort = (): void => {
+        fail(
+          new ClientOperationError({
+            category: "aborted",
+            phase: "transport_connecting",
+            retryable: true,
+            message: "Login cancelled",
+          }),
+        );
+      };
+
+      if (operationOptions?.signal?.aborted) {
+        onAbort();
+        return;
+      }
+
+      loginSocket.on("connect", onConnect);
+      loginSocket.on("message", onMessage);
+      loginSocket.on("connect_error", onConnectError);
+      loginSocket.on("disconnect", onDisconnect);
+      operationOptions?.signal?.addEventListener("abort", onAbort, {
+        once: true,
       });
     });
 
@@ -106,63 +204,195 @@ export class CpjourneyAdapter extends BaseAdapter {
     loginResult: LoginResult,
     options?: ConnectOptions,
   ): Promise<Socket> {
-    // Queue step on a fresh login socket (matches browser flow).
-    // The original login socket is dead — server disconnects after login response.
+    this.reportLifecycle(options, "transport_connecting");
     await this.queueForServer(serverName, options);
 
-    // Connect game socket — still needs game_auth in Node.js
-    // (browser uses cookies from HTTP polling, not available cross-Manager)
+    this.reportLifecycle(options, "transport_connecting");
     const gameSocket = this.createSocket(`/world/${serverName.toLowerCase()}/`);
     this.socket = gameSocket;
+    const timeouts = this.connectionTimeouts(options);
+
+    const forwardMessage = (message: ServerMessage): void => {
+      if (
+        message.action === "game_auth" ||
+        message.action === "wait_queue_update"
+      ) {
+        return;
+      }
+      options?.onMessage?.(message);
+    };
+    const forwardDisconnect = (reason: string): void => {
+      options?.onDisconnect?.(reason ?? null);
+    };
+    gameSocket.on("message", forwardMessage);
+    gameSocket.on("disconnect", forwardDisconnect);
 
     await new Promise<void>((resolve, reject) => {
-      let authSent = false;
+      let settled = false;
+      let timer: ReturnType<typeof setTimeout> | undefined;
+      let activePhase: "transport_connecting" | "authenticating" | "queueing" =
+        "transport_connecting";
 
-      gameSocket.on("connect", () => {
+      const cleanup = (): void => {
+        if (timer !== undefined) clearTimeout(timer);
+        gameSocket.off("connect", onConnect);
+        gameSocket.off("message", onMessage);
+        gameSocket.off("connect_error", onConnectError);
+        gameSocket.off("disconnect", onDisconnect);
+        options?.signal?.removeEventListener("abort", onAbort);
+      };
+
+      const fail = (error: ClientOperationError): void => {
+        if (settled) return;
+        settled = true;
+        cleanup();
+        gameSocket.off("message", forwardMessage);
+        gameSocket.off("disconnect", forwardDisconnect);
+        gameSocket.disconnect();
+        this.socket = null;
+        reject(error);
+      };
+
+      const succeed = (): void => {
+        if (settled) return;
+        settled = true;
+        cleanup();
+        resolve();
+      };
+
+      const startTimer = (
+        timeoutMs: number,
+        category: "transport_error" | "auth_timeout" | "queue_timeout",
+        phase: "transport_connecting" | "authenticating" | "queueing",
+        message: string,
+      ): void => {
+        if (timer !== undefined) clearTimeout(timer);
+        timer = setTimeout(() => {
+          fail(
+            new ClientOperationError({
+              category,
+              phase,
+              retryable: true,
+              message,
+            }),
+          );
+        }, timeoutMs);
+      };
+
+      const onConnect = (): void => {
+        activePhase = "authenticating";
+        this.reportLifecycle(options, "authenticating");
+        startTimer(
+          timeouts.authenticationMs,
+          "auth_timeout",
+          "authenticating",
+          "Game authentication timed out",
+        );
+        const authArgs: Record<string, unknown> = {
+          username: loginResult.username,
+          key: loginResult.key,
+          createToken: false,
+          joinInvis: false,
+          takeoverMascot: false,
+          token: this.gameToken ?? "",
+        };
+
         gameSocket.emit("message", {
           action: "game_auth",
-          args: {
-            username: loginResult.username,
-            key: loginResult.key,
-            createToken: false,
-            joinInvis: false,
-            takeoverMascot: false,
-            token: "",
-          },
+          args: authArgs,
         });
-      });
+      };
 
-      gameSocket.on("message", (msg: ServerMessage) => {
+      const onMessage = (msg: ServerMessage): void => {
         switch (msg.action) {
           case "wait_queue_update": {
-            options?.onQueueUpdate?.(msg.args as QueueUpdate);
+            const update = msg.args as QueueUpdate;
+            activePhase = "queueing";
+            this.reportLifecycle(options, "queueing", update);
+            options?.onQueueUpdate?.(update);
+            startTimer(
+              timeouts.queueMs,
+              "queue_timeout",
+              "queueing",
+              "Game server queue stopped responding",
+            );
             break;
           }
           case "game_auth": {
-            if (authSent) break;
-            authSent = true;
-
             const response = msg.args as GameAuthResponse;
             if (!response.success) {
-              gameSocket.disconnect();
-              reject(new Error("Game auth failed"));
+              fail(
+                new ClientOperationError({
+                  category: "auth_failed",
+                  phase: "authenticating",
+                  retryable: true,
+                  message: "Game authentication failed",
+                }),
+              );
               return;
             }
 
+            this.reportLifecycle(options, "joining_session");
             gameSocket.emit("message", {
               action: "join_server",
               args: {},
             });
-            resolve();
+            succeed();
             break;
           }
         }
-      });
+      };
 
-      gameSocket.on("connect_error", (err: Error) => {
-        gameSocket.disconnect();
-        reject(new Error(`Game connection failed: ${err.message}`));
-      });
+      const onConnectError = (cause: Error): void => {
+        fail(
+          new ClientOperationError({
+            category: "transport_error",
+            phase: "transport_connecting",
+            retryable: true,
+            message: `Game connection failed: ${cause.message}`,
+            cause,
+          }),
+        );
+      };
+
+      const onDisconnect = (reason: string): void => {
+        fail(
+          new ClientOperationError({
+            category: "transport_error",
+            phase: activePhase,
+            retryable: true,
+            message: `Disconnected before joining the game${reason ? `: ${reason}` : ""}`,
+          }),
+        );
+      };
+
+      const onAbort = (): void => {
+        fail(
+          new ClientOperationError({
+            category: "aborted",
+            phase: activePhase,
+            retryable: true,
+            message: "Game connection cancelled",
+          }),
+        );
+      };
+
+      if (options?.signal?.aborted) {
+        onAbort();
+        return;
+      }
+
+      gameSocket.on("connect", onConnect);
+      gameSocket.on("message", onMessage);
+      gameSocket.on("connect_error", onConnectError);
+      gameSocket.on("disconnect", onDisconnect);
+      options?.signal?.addEventListener("abort", onAbort, { once: true });
+      startTimer(
+        timeouts.transportMs,
+        "transport_error",
+        "transport_connecting",
+        "Game transport connection timed out",
+      );
     });
 
     return gameSocket;
@@ -173,43 +403,123 @@ export class CpjourneyAdapter extends BaseAdapter {
     options?: ConnectOptions,
   ): Promise<void> {
     const queueSocket = this.createSocket("/world/login/");
+    const timeouts = this.connectionTimeouts(options);
+    this.reportLifecycle(options, "queueing");
 
     await new Promise<void>((resolve, reject) => {
-      const timeout = setTimeout(() => {
-        queueSocket.disconnect();
-        reject(new Error("Queue timed out"));
-      }, 60_000);
+      let settled = false;
+      let completed = false;
+      let timeout: ReturnType<typeof setTimeout> | undefined;
 
-      queueSocket.on("connect", () => {
+      const startQueueIdleTimer = (): void => {
+        if (timeout !== undefined) clearTimeout(timeout);
+        timeout = setTimeout(() => {
+          fail(
+            new ClientOperationError({
+              category: "queue_timeout",
+              phase: "queueing",
+              retryable: true,
+              message: "Server queue stopped responding",
+            }),
+          );
+        }, timeouts.queueMs);
+      };
+
+      const cleanup = (): void => {
+        if (timeout !== undefined) clearTimeout(timeout);
+        queueSocket.off("connect", onConnect);
+        queueSocket.off("message", onMessage);
+        queueSocket.off("disconnect", onDisconnect);
+        queueSocket.off("connect_error", onConnectError);
+        options?.signal?.removeEventListener("abort", onAbort);
+      };
+
+      const fail = (error: ClientOperationError): void => {
+        if (settled) return;
+        settled = true;
+        cleanup();
+        queueSocket.disconnect();
+        reject(error);
+      };
+
+      const succeed = (): void => {
+        if (settled) return;
+        settled = true;
+        completed = true;
+        cleanup();
+        queueSocket.disconnect();
+        resolve();
+      };
+
+      const onConnect = (): void => {
         queueSocket.emit("message", {
           action: "queue_server_join",
           args: { server: serverName },
         });
-      });
+      };
 
-      queueSocket.on("message", (msg: ServerMessage) => {
+      const onMessage = (msg: ServerMessage): void => {
         switch (msg.action) {
-          case "wait_queue_update":
-            options?.onQueueUpdate?.(msg.args as QueueUpdate);
+          case "wait_queue_update": {
+            const update = msg.args as QueueUpdate;
+            this.reportLifecycle(options, "queueing", update);
+            options?.onQueueUpdate?.(update);
+            startQueueIdleTimer();
             break;
-          case "queue_server_join":
-            clearTimeout(timeout);
-            queueSocket.disconnect();
-            resolve();
+          }
+          case "queue_server_join": {
+            succeed();
             break;
+          }
         }
-      });
+      };
 
-      queueSocket.once("disconnect", () => {
-        clearTimeout(timeout);
-        resolve();
-      });
+      const onDisconnect = (reason: string): void => {
+        if (completed) return;
+        fail(
+          new ClientOperationError({
+            category: "transport_error",
+            phase: "queueing",
+            retryable: true,
+            message: `Queue connection closed unexpectedly${reason ? `: ${reason}` : ""}`,
+          }),
+        );
+      };
 
-      queueSocket.on("connect_error", (err: Error) => {
-        clearTimeout(timeout);
-        queueSocket.disconnect();
-        reject(new Error(`Queue connection failed: ${err.message}`));
-      });
+      const onConnectError = (cause: Error): void => {
+        fail(
+          new ClientOperationError({
+            category: "transport_error",
+            phase: "queueing",
+            retryable: true,
+            message: `Queue connection failed: ${cause.message}`,
+            cause,
+          }),
+        );
+      };
+
+      const onAbort = (): void => {
+        fail(
+          new ClientOperationError({
+            category: "aborted",
+            phase: "queueing",
+            retryable: true,
+            message: "Queue wait cancelled",
+          }),
+        );
+      };
+
+      if (options?.signal?.aborted) {
+        onAbort();
+        return;
+      }
+
+      queueSocket.on("connect", onConnect);
+      queueSocket.on("message", onMessage);
+      queueSocket.on("disconnect", onDisconnect);
+      queueSocket.on("connect_error", onConnectError);
+      options?.signal?.addEventListener("abort", onAbort, { once: true });
+      startQueueIdleTimer();
     });
   }
 
@@ -379,6 +689,10 @@ export class CpjourneyAdapter extends BaseAdapter {
     this.send("get_buddy", { id, type });
   }
 
+  override findBuddy(id: number): void {
+    this.send("buddy_find", { id });
+  }
+
   override removeBuddy(id: number): void {
     this.send("remove_buddy", { id });
   }
@@ -423,8 +737,43 @@ export class CpjourneyAdapter extends BaseAdapter {
     this.send("get_igloos", {});
   }
 
-  override getPuffles(userId: number): void {
-    this.send("get_puffles", { userId });
+  override getPuffles(userId: number, isBackyard?: boolean): void {
+    this.send("get_puffles", {
+      userId,
+      ...(isBackyard !== undefined ? { isBackyard } : {}),
+    });
+  }
+
+  override getAllPuffles(): void {
+    this.send("get_all_puffles", {});
+  }
+
+  override getPuffleWellbeing(puffle: number): void {
+    this.send("get_wellbeing", { puffle });
+  }
+
+  override playPuffle(puffle: number): void {
+    this.send("puffle_play", { puffle });
+  }
+
+  override restPuffle(puffle: number): void {
+    this.send("update_puffle_rest", { puffle });
+  }
+
+  override buyPuffleItem(puffleId: number, item: number): void {
+    this.send("puffle_buy_item", { puffleId, item });
+  }
+
+  override walkPuffle(puffle: number): void {
+    this.send("walk_puffle", { puffle });
+  }
+
+  override initializePuffleTower(): void {
+    this.send("tower_init", {});
+  }
+
+  override getBackyardSupplies(): void {
+    this.send("backyard_supplies", {});
   }
 
   override adoptPuffle(type: number, name: string): void {
@@ -441,6 +790,78 @@ export class CpjourneyAdapter extends BaseAdapter {
 
   override joinIgloo(igloo: number, x?: number, y?: number): void {
     this.send("join_igloo", { igloo, x: x ?? 0, y: y ?? 0 });
+  }
+
+  override getStoreMusic(): void {
+    this.send("get_store_music", {});
+  }
+
+  override buyMusic(music: string): void {
+    this.send("add_music", { music });
+  }
+
+  override getIglooStoreItems(): void {
+    this.send("get_igloostore_items", {});
+  }
+
+  override buyFurniture(furniture: string, amount: number): void {
+    this.send("add_furniture", { furniture, amount });
+  }
+
+  override updateIglooMusic(music: string): void {
+    this.send("update_music", { music });
+  }
+
+  override updateIglooFurniture(
+    furniture: Array<{
+      furnitureId: number;
+      x: number;
+      y: number;
+      rotation: number;
+      frame: number;
+      depth: number;
+      slot?: number;
+    }>,
+  ): void {
+    this.send("update_furniture", { furniture });
+  }
+
+  override autoUpdateIglooFurniture(
+    furniture: Array<{
+      furnitureId: number;
+      x: number;
+      y: number;
+      rotation: number;
+      frame: number;
+      depth: number;
+      slot?: number;
+    }>,
+  ): void {
+    this.send("update_furniture_auto", { furniture });
+  }
+
+  override updateIglooType(type: number): void {
+    this.send("update_igloo", { type });
+  }
+
+  override openIgloo(): void {
+    this.send("open_igloo", {});
+  }
+
+  override closeIglooBounds(): void {
+    this.send("close_igloo_bounds", {});
+  }
+
+  override likeIgloo(): void {
+    this.send("like_igloo", {});
+  }
+
+  override openIglooEditor(): void {
+    this.send("igloo_editor_open", {});
+  }
+
+  override closeIglooEditor(): void {
+    this.send("igloo_editor_closed", {});
   }
 
   override gameOver(coins: number): void {
@@ -483,7 +904,7 @@ export class CpjourneyAdapter extends BaseAdapter {
     this.send("join_waddle", { waddle });
   }
 
-  private createSocket(path: string): Socket {
+  protected createSocket(path: string): Socket {
     return io(BASE_URL, {
       ...this.socketIoOptions(BASE_URL),
       path,

@@ -1,12 +1,18 @@
+import type { ClientDisconnectInfo } from "../lifecycle.js";
 import type { QueueUpdate } from "./adapter-types.js";
 import type {
+  FurnitureStoreItem,
   GameCard,
   GamePlayer,
+  IglooFurniturePlacement,
+  IglooStoreItem,
   Mascot,
   MatState,
   NinjaData,
   PlayerData,
   Postcard,
+  Puffle,
+  PuffleWellbeing,
   RoomUser,
   RoundResult,
 } from "./player-types.js";
@@ -34,7 +40,7 @@ export type ClientMessages = {
   get_postcards: Record<string, never>;
   get_igloo_open: { igloo: number };
   get_igloos: Record<string, never>;
-  get_puffles: { userId: number };
+  get_puffles: { userId: number; isBackyard?: boolean };
   get_igloo_likes: Record<string, never>;
   join_igloo: { igloo: number; x?: number; y?: number };
   update_color: { item: number };
@@ -54,6 +60,28 @@ export type ClientMessages = {
   join_server: Record<string, never>;
   adopt_puffle: { type: number; name: string };
   check_puffle_sprite: { puffleSprite: unknown };
+  get_all_puffles: Record<string, never>;
+  get_wellbeing: { puffle: number };
+  puffle_play: { puffle: number };
+  update_puffle_rest: { puffle: number };
+  puffle_buy_item: { puffleId: number; item: number };
+  walk_puffle: { puffle: number };
+  backyard_supplies: Record<string, never>;
+  buddy_find: { id: number };
+  get_store_music: Record<string, never>;
+  add_music: { music: string };
+  get_igloostore_items: Record<string, never>;
+  add_furniture: { furniture: string; amount: number };
+  update_music: { music: string };
+  update_furniture: { furniture: IglooFurniturePlacement[] };
+  update_furniture_auto: { furniture: IglooFurniturePlacement[] };
+  update_igloo: { type: number };
+  open_igloo: Record<string, never>;
+  close_igloo_bounds: Record<string, never>;
+  like_igloo: Record<string, never>;
+  igloo_editor_open: Record<string, never>;
+  igloo_editor_closed: Record<string, never>;
+  tower_init: Record<string, never>;
   queue_server_join: { server: string };
   /** Fetch ninja rank, progress, and card deck */
   get_ninja: Record<string, never>;
@@ -242,8 +270,41 @@ export type ServerMessages = {
   };
   get_puffles: {
     userId: number;
-    puffles: { id: number; type: number }[];
+    puffles: Puffle[];
   };
+  get_all_puffles: { puffles: Puffle[] };
+  get_wellbeing: PuffleWellbeing;
+  get_walking_puffle: { puffle: Puffle };
+  update_wellbeing: PuffleWellbeing;
+  puffle_levelup: { puffleId: number; level: number };
+  puffle_popup: { puffleId: number; popupId: number };
+  buy_puffle_item: {
+    puffleId: number;
+    item: number;
+    coins: number;
+    puffleInventory: Record<string, unknown>;
+  };
+  walk_puffle: { user: number; puffle: number; type: number };
+  backyard_supplies: {
+    supplyCost: number;
+    puffleCount: number;
+    supplyState: number;
+  };
+  buddy_find: { find: number; username: string; game: boolean };
+  receive_postcard: Postcard;
+  get_store_music: { music: IglooStoreItem[] };
+  add_music: { music: string; coins: number };
+  get_igloostore_items: {
+    furniture: FurnitureStoreItem[];
+    flooring: IglooStoreItem[];
+    igloo: IglooStoreItem[];
+    location: IglooStoreItem[];
+  };
+  add_furniture: { furniture: string; coins: number; amount: number };
+  update_music: { music: string };
+  igloo_open_status: { status: number };
+  igloo_bounds_status: { status: number };
+  igloo_liked: Record<string, never>;
   update_player: {
     id: number;
     item: number;
@@ -270,7 +331,7 @@ export type ServerMessages = {
   /** A player equipped or removed a transformation costume (0 = reverted to normal) */
   transform_player: { id: number; transform: number };
   adopt_puffle: {
-    puffle: unknown;
+    puffle?: unknown;
     coins: number;
   };
   /** Generic server info/notification message */
@@ -281,7 +342,7 @@ export type ServerMessages = {
     action: string;
     args: Record<string, unknown>;
   };
-  disconnect: undefined;
+  disconnect: ClientDisconnectInfo;
   /** Ninja rank, progress, and full card deck */
   get_ninja: NinjaData;
   /** State of all Dojo mats — keys are mat IDs, values are seat arrays */
@@ -315,3 +376,62 @@ export type ServerMessages = {
   /** Game finished — winner seat, winning card UUIDs, and result message */
   game_won: { winner: number; uuid: string[]; message: string };
 };
+
+/** CPJourney-only commands captured from its Socket.IO protocol. */
+export type CpjourneyClientMessages = Pick<
+  ClientMessages,
+  | "get_puffles"
+  | "adopt_puffle"
+  | "check_puffle_sprite"
+  | "get_all_puffles"
+  | "get_wellbeing"
+  | "puffle_play"
+  | "update_puffle_rest"
+  | "puffle_buy_item"
+  | "walk_puffle"
+  | "backyard_supplies"
+  | "buddy_find"
+  | "get_store_music"
+  | "add_music"
+  | "get_igloostore_items"
+  | "add_furniture"
+  | "update_music"
+  | "update_furniture"
+  | "update_furniture_auto"
+  | "update_igloo"
+  | "open_igloo"
+  | "close_igloo_bounds"
+  | "like_igloo"
+  | "igloo_editor_open"
+  | "igloo_editor_closed"
+  | "tower_init"
+>;
+
+/** CPJourney-only events captured from its Socket.IO protocol. */
+export type CpjourneyServerMessages = Pick<
+  ServerMessages,
+  | "game_over"
+  | "get_postcards"
+  | "join_igloo"
+  | "get_puffles"
+  | "adopt_puffle"
+  | "get_all_puffles"
+  | "get_wellbeing"
+  | "get_walking_puffle"
+  | "update_wellbeing"
+  | "puffle_levelup"
+  | "puffle_popup"
+  | "buy_puffle_item"
+  | "walk_puffle"
+  | "backyard_supplies"
+  | "buddy_find"
+  | "receive_postcard"
+  | "get_store_music"
+  | "add_music"
+  | "get_igloostore_items"
+  | "add_furniture"
+  | "update_music"
+  | "igloo_open_status"
+  | "igloo_bounds_status"
+  | "igloo_liked"
+>;

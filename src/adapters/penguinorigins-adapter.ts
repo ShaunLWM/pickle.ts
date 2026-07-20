@@ -1,4 +1,9 @@
 import { io, type Socket } from "socket.io-client";
+import { ClientOperationError } from "../errors.js";
+import {
+  type ClientOperationOptions,
+  DEFAULT_CLIENT_CONNECTION_TIMEOUTS,
+} from "../lifecycle.js";
 import type {
   LoginOptions,
   LoginResult,
@@ -31,16 +36,53 @@ type ServerMessage = {
 export class PenguinoriginsAdapter extends BaseAdapter {
   readonly id = "PenguinOrigins";
 
-  async login(options: LoginOptions | TokenLoginOptions): Promise<LoginResult> {
+  async login(
+    options: LoginOptions | TokenLoginOptions,
+    operationOptions?: ClientOperationOptions,
+  ): Promise<LoginResult> {
+    this.resetLoginState();
     const loginSocket = this.createSocket("/world/login/");
 
     const result = await new Promise<LoginResult>((resolve, reject) => {
+      let settled = false;
       const timeout = setTimeout(() => {
-        loginSocket.disconnect();
-        reject(new Error("Login timed out"));
-      }, 10_000);
+        fail(
+          new ClientOperationError({
+            category: "login_timeout",
+            phase: "transport_connecting",
+            retryable: true,
+            message: "Login timed out",
+          }),
+        );
+      }, operationOptions?.timeoutMs ??
+        DEFAULT_CLIENT_CONNECTION_TIMEOUTS.loginMs);
 
-      loginSocket.on("connect", () => {
+      const cleanup = (): void => {
+        clearTimeout(timeout);
+        loginSocket.off("connect", onConnect);
+        loginSocket.off("message", onMessage);
+        loginSocket.off("connect_error", onConnectError);
+        loginSocket.off("disconnect", onDisconnect);
+        operationOptions?.signal?.removeEventListener("abort", onAbort);
+      };
+
+      const fail = (error: ClientOperationError): void => {
+        if (settled) return;
+        settled = true;
+        cleanup();
+        loginSocket.disconnect();
+        reject(error);
+      };
+
+      const succeed = (value: LoginResult): void => {
+        if (settled) return;
+        settled = true;
+        cleanup();
+        loginSocket.disconnect();
+        resolve(value);
+      };
+
+      const onConnect = (): void => {
         const action = "token" in options ? "token_login" : "login";
         const args =
           "token" in options
@@ -48,19 +90,28 @@ export class PenguinoriginsAdapter extends BaseAdapter {
             : { username: options.username, password: options.password };
 
         loginSocket.emit("message", { action, args });
-      });
+      };
 
-      loginSocket.on("message", (msg: ServerMessage) => {
+      const onMessage = (msg: ServerMessage): void => {
         if (msg.action !== "login") return;
-
-        clearTimeout(timeout);
-        loginSocket.disconnect();
 
         const response = msg.args as LoginResponse;
 
         if (!response.success) {
           this.loginMessage = response.message ?? null;
-          reject(new Error(response.message ?? "Login failed"));
+          const message = response.message ?? "Login failed";
+          const invalidCredentials =
+            /password|credential|incorrect|invalid login/i.test(message);
+          fail(
+            new ClientOperationError({
+              category: invalidCredentials
+                ? "invalid_credentials"
+                : "login_rejected",
+              phase: "transport_connecting",
+              retryable: false,
+              message,
+            }),
+          );
           return;
         }
 
@@ -68,19 +119,60 @@ export class PenguinoriginsAdapter extends BaseAdapter {
           ([name, population]) => ({ name, population }),
         );
 
-        resolve({
+        succeed({
           servers,
           key: response.key,
           username: response.username,
           moderator: false,
           buddyWorlds: [],
         });
-      });
+      };
 
-      loginSocket.on("connect_error", (err: Error) => {
-        clearTimeout(timeout);
-        loginSocket.disconnect();
-        reject(new Error(`Login connection failed: ${err.message}`));
+      const onConnectError = (cause: Error): void => {
+        fail(
+          new ClientOperationError({
+            category: "transport_error",
+            phase: "transport_connecting",
+            retryable: true,
+            message: `Login connection failed: ${cause.message}`,
+            cause,
+          }),
+        );
+      };
+
+      const onDisconnect = (reason: string): void => {
+        fail(
+          new ClientOperationError({
+            category: "transport_error",
+            phase: "transport_connecting",
+            retryable: true,
+            message: `Login connection closed unexpectedly${reason ? `: ${reason}` : ""}`,
+          }),
+        );
+      };
+
+      const onAbort = (): void => {
+        fail(
+          new ClientOperationError({
+            category: "aborted",
+            phase: "transport_connecting",
+            retryable: true,
+            message: "Login cancelled",
+          }),
+        );
+      };
+
+      if (operationOptions?.signal?.aborted) {
+        onAbort();
+        return;
+      }
+
+      loginSocket.on("connect", onConnect);
+      loginSocket.on("message", onMessage);
+      loginSocket.on("connect_error", onConnectError);
+      loginSocket.on("disconnect", onDisconnect);
+      operationOptions?.signal?.addEventListener("abort", onAbort, {
+        once: true,
       });
     });
 
@@ -92,13 +184,87 @@ export class PenguinoriginsAdapter extends BaseAdapter {
     loginResult: LoginResult,
     options?: ConnectOptions,
   ): Promise<Socket> {
+    this.reportLifecycle(options, "transport_connecting");
     const gameSocket = this.createSocket(`/world/${serverName.toLowerCase()}/`);
     this.socket = gameSocket;
+    const timeouts = this.connectionTimeouts(options);
+
+    const forwardMessage = (message: ServerMessage): void => {
+      if (
+        message.action === "game_auth" ||
+        message.action === "wait_queue_update"
+      ) {
+        return;
+      }
+      options?.onMessage?.(message);
+    };
+    const forwardDisconnect = (reason: string): void => {
+      options?.onDisconnect?.(reason ?? null);
+    };
+    gameSocket.on("message", forwardMessage);
+    gameSocket.on("disconnect", forwardDisconnect);
 
     await new Promise<void>((resolve, reject) => {
-      let authSent = false;
+      let settled = false;
+      let timer: ReturnType<typeof setTimeout> | undefined;
+      let activePhase: "transport_connecting" | "authenticating" | "queueing" =
+        "transport_connecting";
 
-      gameSocket.on("connect", () => {
+      const cleanup = (): void => {
+        if (timer !== undefined) clearTimeout(timer);
+        gameSocket.off("connect", onConnect);
+        gameSocket.off("message", onMessage);
+        gameSocket.off("connect_error", onConnectError);
+        gameSocket.off("disconnect", onDisconnect);
+        options?.signal?.removeEventListener("abort", onAbort);
+      };
+
+      const fail = (error: ClientOperationError): void => {
+        if (settled) return;
+        settled = true;
+        cleanup();
+        gameSocket.off("message", forwardMessage);
+        gameSocket.off("disconnect", forwardDisconnect);
+        gameSocket.disconnect();
+        this.socket = null;
+        reject(error);
+      };
+
+      const succeed = (): void => {
+        if (settled) return;
+        settled = true;
+        cleanup();
+        resolve();
+      };
+
+      const startTimer = (
+        timeoutMs: number,
+        category: "transport_error" | "auth_timeout" | "queue_timeout",
+        phase: "transport_connecting" | "authenticating" | "queueing",
+        message: string,
+      ): void => {
+        if (timer !== undefined) clearTimeout(timer);
+        timer = setTimeout(() => {
+          fail(
+            new ClientOperationError({
+              category,
+              phase,
+              retryable: true,
+              message,
+            }),
+          );
+        }, timeoutMs);
+      };
+
+      const onConnect = (): void => {
+        activePhase = "authenticating";
+        this.reportLifecycle(options, "authenticating");
+        startTimer(
+          timeouts.authenticationMs,
+          "auth_timeout",
+          "authenticating",
+          "Game authentication timed out",
+        );
         gameSocket.emit("message", {
           action: "game_auth",
           args: {
@@ -108,39 +274,98 @@ export class PenguinoriginsAdapter extends BaseAdapter {
             token: "",
           },
         });
-      });
+      };
 
-      gameSocket.on("message", (msg: ServerMessage) => {
+      const onMessage = (msg: ServerMessage): void => {
         switch (msg.action) {
           case "wait_queue_update": {
-            options?.onQueueUpdate?.(msg.args as QueueUpdate);
+            const update = msg.args as QueueUpdate;
+            activePhase = "queueing";
+            this.reportLifecycle(options, "queueing", update);
+            options?.onQueueUpdate?.(update);
+            startTimer(
+              timeouts.queueMs,
+              "queue_timeout",
+              "queueing",
+              "Game server queue stopped responding",
+            );
             break;
           }
           case "game_auth": {
-            if (authSent) break;
-            authSent = true;
-
             const response = msg.args as GameAuthResponse;
             if (!response.success) {
-              gameSocket.disconnect();
-              reject(new Error("Game auth failed"));
+              fail(
+                new ClientOperationError({
+                  category: "auth_failed",
+                  phase: "authenticating",
+                  retryable: true,
+                  message: "Game authentication failed",
+                }),
+              );
               return;
             }
 
+            this.reportLifecycle(options, "joining_session");
             gameSocket.emit("message", {
               action: "join_server",
               args: {},
             });
-            resolve();
+            succeed();
             break;
           }
         }
-      });
+      };
 
-      gameSocket.on("connect_error", (err: Error) => {
-        gameSocket.disconnect();
-        reject(new Error(`Game connection failed: ${err.message}`));
-      });
+      const onConnectError = (cause: Error): void => {
+        fail(
+          new ClientOperationError({
+            category: "transport_error",
+            phase: "transport_connecting",
+            retryable: true,
+            message: `Game connection failed: ${cause.message}`,
+            cause,
+          }),
+        );
+      };
+
+      const onDisconnect = (reason: string): void => {
+        fail(
+          new ClientOperationError({
+            category: "transport_error",
+            phase: activePhase,
+            retryable: true,
+            message: `Disconnected before game authentication${reason ? `: ${reason}` : ""}`,
+          }),
+        );
+      };
+
+      const onAbort = (): void => {
+        fail(
+          new ClientOperationError({
+            category: "aborted",
+            phase: activePhase,
+            retryable: true,
+            message: "Game connection cancelled",
+          }),
+        );
+      };
+
+      if (options?.signal?.aborted) {
+        onAbort();
+        return;
+      }
+
+      gameSocket.on("connect", onConnect);
+      gameSocket.on("message", onMessage);
+      gameSocket.on("connect_error", onConnectError);
+      gameSocket.on("disconnect", onDisconnect);
+      options?.signal?.addEventListener("abort", onAbort, { once: true });
+      startTimer(
+        timeouts.transportMs,
+        "transport_error",
+        "transport_connecting",
+        "Game transport connection timed out",
+      );
     });
 
     return gameSocket;
@@ -293,7 +518,7 @@ export class PenguinoriginsAdapter extends BaseAdapter {
     this.send("game_over", { coins });
   }
 
-  private createSocket(path: string): Socket {
+  protected createSocket(path: string): Socket {
     return io(BASE_URL, {
       ...this.socketIoOptions(BASE_URL),
       path,

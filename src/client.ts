@@ -1,8 +1,18 @@
 import { EventEmitter } from "node:events";
-import type { BaseAdapter, ConnectOptions } from "./adapters/base-adapter.js";
+import type {
+  AdapterMessage,
+  BaseAdapter,
+  ConnectOptions,
+} from "./adapters/base-adapter.js";
 import { type AdapterName, createAdapter } from "./adapters/index.js";
 import type { ConnectionProfileInput } from "./connection-profile.js";
+import { ClientOperationError } from "./errors.js";
 import { CardJitsu } from "./games/card-jitsu.js";
+import {
+  type ClientDisconnectInfo,
+  type ClientOperationOptions,
+  DEFAULT_CLIENT_CONNECTION_TIMEOUTS,
+} from "./lifecycle.js";
 import type {
   LoginOptions,
   LoginResult,
@@ -10,7 +20,7 @@ import type {
   ServerInfo,
   TokenLoginOptions,
 } from "./types/adapter-types.js";
-import type { ServerMessages } from "./types/message-types.js";
+import type { ClientMessages, ServerMessages } from "./types/message-types.js";
 import type { PlayerData, RoomUser } from "./types/player-types.js";
 
 /** Actions with explicit switch-case handling or typed in ServerMessages — not truly unknown. */
@@ -59,6 +69,7 @@ const KNOWN_ACTIONS = new Set<string>([
   "buddy_reject",
   "buddy_request_seen",
   "get_buddy",
+  "buddy_find",
   "send_postcard",
   "stamps_result",
   "ignore_add",
@@ -70,6 +81,24 @@ const KNOWN_ACTIONS = new Set<string>([
   "get_igloo_likes",
   "join_igloo",
   "get_puffles",
+  "get_all_puffles",
+  "get_wellbeing",
+  "get_walking_puffle",
+  "update_wellbeing",
+  "puffle_levelup",
+  "puffle_popup",
+  "buy_puffle_item",
+  "walk_puffle",
+  "backyard_supplies",
+  "receive_postcard",
+  "get_store_music",
+  "add_music",
+  "get_igloostore_items",
+  "add_furniture",
+  "update_music",
+  "igloo_open_status",
+  "igloo_bounds_status",
+  "igloo_liked",
   "get_mascots",
   "wait_queue_update",
   "slot",
@@ -89,23 +118,16 @@ type ServerMessageHandler<K extends keyof ServerMessages> = (
   args: ServerMessages[K],
 ) => void;
 
+type ServerMessageMatcher<K extends keyof ServerMessages> = (
+  args: ServerMessages[K],
+) => boolean;
+
 export type LogFn = (message: string, ...args: unknown[]) => void;
 
 export type ClientOptions = {
   debug?: boolean | LogFn;
   connectionProfile?: ConnectionProfileInput;
 };
-
-type MessagePayload = {
-  action: string;
-  args: Record<string, unknown>;
-};
-
-function isMessagePayload(msg: unknown): msg is MessagePayload {
-  return (
-    typeof msg === "object" && msg !== null && "action" in msg && "args" in msg
-  );
-}
 
 export class Client extends EventEmitter {
   player: PlayerData | null = null;
@@ -117,6 +139,13 @@ export class Client extends EventEmitter {
   private loginResult: LoginResult | null = null;
   private log: LogFn | null = null;
   private _cardJitsu: CardJitsu | null = null;
+  private intentionalDisconnect = false;
+  private disconnectNotified = false;
+  private connectionFailure: ClientOperationError | null = null;
+  private lifecycleReporter: ConnectOptions["onLifecycleUpdate"];
+  private requestTails = new Map<keyof ServerMessages, Promise<void>>();
+  private disconnectEpoch = 0;
+  private lastDisconnectInfo: ClientDisconnectInfo | null = null;
 
   get loginMessage(): string | null {
     return this.adapter.loginMessage;
@@ -128,7 +157,7 @@ export class Client extends EventEmitter {
 
   get cardJitsu(): CardJitsu {
     if (!this._cardJitsu)
-      this._cardJitsu = new CardJitsu(this.adapter, this.waitFor.bind(this));
+      this._cardJitsu = new CardJitsu(this.adapter, this.request.bind(this));
     return this._cardJitsu;
   }
 
@@ -146,17 +175,25 @@ export class Client extends EventEmitter {
 
   async login(
     options: LoginOptions | TokenLoginOptions,
+    operationOptions?: ClientOperationOptions,
   ): Promise<ServerInfo[]> {
     this.log?.("[login] logging in as", options.username);
-    this.loginResult = await this.adapter.login(options);
-    this.log?.("[login] success —", this.loginResult.servers.length, "servers");
-    return this.loginResult.servers;
+    this.loginResult = null;
+    const loginResult = await this.adapter.login(options, operationOptions);
+    this.loginResult = loginResult;
+    this.log?.("[login] success —", loginResult.servers.length, "servers");
+    return loginResult.servers;
   }
 
   async connect(serverName: string, options?: ConnectOptions): Promise<void> {
     if (!this.loginResult) throw new Error("Must call login() first");
 
     this.log?.("[connect] joining", serverName);
+    this.intentionalDisconnect = false;
+    this.disconnectNotified = false;
+    this.connectionFailure = null;
+    this.lastDisconnectInfo = null;
+    this.lifecycleReporter = options?.onLifecycleUpdate;
 
     const connectOptions: ConnectOptions = {
       ...options,
@@ -165,91 +202,174 @@ export class Client extends EventEmitter {
         this.emit("wait_queue_update", update);
         options?.onQueueUpdate?.(update);
       },
+      onMessage: (message: AdapterMessage) => {
+        this.handleMessage(message);
+      },
+      onDisconnect: (reason) => {
+        this.handleAdapterDisconnect(reason);
+      },
     };
 
-    const socket = await this.adapter.connect(
-      serverName,
-      this.loginResult,
-      connectOptions,
-    );
-
-    socket.on("message", (msg: unknown) => {
-      if (!isMessagePayload(msg)) return;
-      this.handleMessage(msg);
-    });
-
-    socket.on("disconnect", () => {
-      this.log?.("[disconnect] connection lost");
+    try {
+      await this.adapter.connect(serverName, this.loginResult, connectOptions);
+      this.reportLifecycle("awaiting_initial_state");
+      await this.waitForInitialState(connectOptions);
+      this.connected = true;
+      this.connectionFailure = null;
+      this.reportLifecycle("ready");
+    } catch (cause) {
+      const error =
+        cause instanceof ClientOperationError
+          ? cause
+          : new ClientOperationError({
+              category: "transport_error",
+              phase: "transport_connecting",
+              retryable: true,
+              message:
+                cause instanceof Error ? cause.message : "Connection failed",
+              cause,
+            });
+      this.intentionalDisconnect = false;
+      this.adapter.disconnect();
       this.cleanup();
-      this.emit("disconnect");
-    });
+      if (!this.disconnectNotified) {
+        this.disconnectNotified = true;
+        this.disconnectEpoch += 1;
+        this.lastDisconnectInfo = {
+          intentional: false,
+          reason: error.message,
+          occurredAt: Date.now(),
+        };
+        this.reportLifecycle("disconnected");
+      }
+      throw error;
+    }
+  }
 
-    await new Promise<void>((resolve, reject) => {
-      const timeout = setTimeout(() => {
-        reject(new Error("Waiting for load_player timed out"));
-      }, 10_000);
+  private waitForInitialState(options: ConnectOptions): Promise<void> {
+    const timeoutMs =
+      options.timeouts?.initialStateMs ??
+      DEFAULT_CLIENT_CONNECTION_TIMEOUTS.initialStateMs;
 
-      let playerLoaded = false;
-      let roomJoined = false;
+    return new Promise<void>((resolve, reject) => {
+      let settled = false;
+      let timer: ReturnType<typeof setTimeout> | undefined;
+
+      const cleanupWait = (): void => {
+        if (timer !== undefined) clearTimeout(timer);
+        this.off("load_player", onProgress);
+        this.off("join_room", onProgress);
+        this.off("kick", onKick);
+        this.off("close_with_error", onCloseWithError);
+        this.off("server_error", onServerError);
+        this.off("disconnect", onDisconnect);
+        options.signal?.removeEventListener("abort", onAbort);
+      };
+
+      const succeed = (): void => {
+        if (settled) return;
+        settled = true;
+        cleanupWait();
+        resolve();
+      };
+
+      const fail = (error: ClientOperationError): void => {
+        if (settled) return;
+        settled = true;
+        cleanupWait();
+        reject(error);
+      };
 
       const checkReady = (): void => {
-        if (playerLoaded && roomJoined) {
-          clearTimeout(timeout);
-          this.connected = true;
-          resolve();
+        if (this.connectionFailure) {
+          fail(this.connectionFailure);
+          return;
         }
+        if (this.player !== null && this.room !== null) succeed();
       };
 
-      const onMessage = (msg: unknown): void => {
-        if (!isMessagePayload(msg)) return;
-        switch (msg.action) {
-          case "load_player":
-            playerLoaded = true;
-            checkReady();
-            break;
-          case "join_room":
-            roomJoined = true;
-            checkReady();
-            break;
-          case "kick":
-            clearTimeout(timeout);
-            socket.off("message", onMessage);
-            reject(
-              new Error(
-                `Kicked: ${(msg.args as { reason?: string }).reason ?? "unknown"}`,
-              ),
-            );
-            break;
-          case "close_with_error":
-            clearTimeout(timeout);
-            socket.off("message", onMessage);
-            reject(
-              new Error(
-                `Kicked: ${(msg.args as { error?: string }).error ?? "unknown"}`,
-              ),
-            );
-            break;
-          case "error":
-            clearTimeout(timeout);
-            socket.off("message", onMessage);
-            reject(
-              new Error(
-                `Server error: ${(msg.args as { error?: string | number }).error ?? "unknown"}`,
-              ),
-            );
-            break;
-        }
+      const onProgress = (): void => checkReady();
+      const onKick = ({ reason }: ServerMessages["kick"]): void => {
+        fail(
+          new ClientOperationError({
+            category: "kicked",
+            phase: "awaiting_initial_state",
+            retryable: true,
+            message: `Kicked before initial state: ${reason ?? "unknown"}`,
+          }),
+        );
+      };
+      const onCloseWithError = ({
+        error,
+      }: ServerMessages["close_with_error"]): void => {
+        fail(
+          new ClientOperationError({
+            category: "kicked",
+            phase: "awaiting_initial_state",
+            retryable: true,
+            message: `Connection closed before initial state: ${error ?? "unknown"}`,
+          }),
+        );
+      };
+      const onServerError = ({
+        error,
+      }: ServerMessages["server_error"]): void => {
+        fail(
+          new ClientOperationError({
+            category: "server_error",
+            phase: "awaiting_initial_state",
+            retryable: true,
+            message: `Server error before initial state: ${String(error)}`,
+          }),
+        );
+      };
+      const onDisconnect = (info: ClientDisconnectInfo): void => {
+        fail(
+          new ClientOperationError({
+            category: "disconnected",
+            phase: "awaiting_initial_state",
+            retryable: !info.intentional,
+            message: `Disconnected before initial state${info.reason ? `: ${info.reason}` : ""}`,
+          }),
+        );
+      };
+      const onAbort = (): void => {
+        fail(
+          new ClientOperationError({
+            category: "aborted",
+            phase: "awaiting_initial_state",
+            retryable: true,
+            message: "Initial state wait cancelled",
+          }),
+        );
       };
 
-      const onDisconnect = (): void => {
-        if (!playerLoaded || !roomJoined) {
-          clearTimeout(timeout);
-          reject(new Error("Disconnected before fully loaded"));
-        }
-      };
+      this.on("load_player", onProgress);
+      this.on("join_room", onProgress);
+      this.on("kick", onKick);
+      this.on("close_with_error", onCloseWithError);
+      this.on("server_error", onServerError);
+      this.on("disconnect", onDisconnect);
+      options.signal?.addEventListener("abort", onAbort, { once: true });
 
-      socket.on("message", onMessage);
-      socket.once("disconnect", onDisconnect);
+      if (options.signal?.aborted) {
+        onAbort();
+        return;
+      }
+
+      checkReady();
+      if (settled) return;
+
+      timer = setTimeout(() => {
+        fail(
+          new ClientOperationError({
+            category: "initial_state_timeout",
+            phase: "awaiting_initial_state",
+            retryable: true,
+            message: "Waiting for initial player and room state timed out",
+          }),
+        );
+      }, timeoutMs);
     });
   }
 
@@ -289,39 +409,207 @@ export class Client extends EventEmitter {
     return super.emit(event, ...args);
   }
 
-  /** Wait for a server event. Resolves with the event payload. Optional timeout in ms. Rejects on disconnect. */
+  /** Wait for a server event. Resolves with the event payload and rejects on timeout, abort, or disconnect. */
   waitFor<K extends keyof ServerMessages>(
     event: K,
     timeout?: number,
+  ): Promise<ServerMessages[K]>;
+  waitFor<K extends keyof ServerMessages>(
+    event: K,
+    options?: ClientOperationOptions,
+  ): Promise<ServerMessages[K]>;
+  waitFor<K extends keyof ServerMessages>(
+    event: K,
+    optionsOrTimeout?: number | ClientOperationOptions,
   ): Promise<ServerMessages[K]> {
+    return this.waitForEvent(event, optionsOrTimeout);
+  }
+
+  private waitForEvent<K extends keyof ServerMessages>(
+    event: K,
+    optionsOrTimeout?: number | ClientOperationOptions,
+    send?: () => void,
+    matches?: ServerMessageMatcher<K>,
+  ): Promise<ServerMessages[K]> {
+    const options =
+      typeof optionsOrTimeout === "number"
+        ? { timeoutMs: optionsOrTimeout }
+        : optionsOrTimeout;
+    const timeoutMs =
+      options?.timeoutMs ?? DEFAULT_CLIENT_CONNECTION_TIMEOUTS.requestMs;
+
     return new Promise<ServerMessages[K]>((resolve, reject) => {
+      let settled = false;
       let timer: ReturnType<typeof setTimeout> | undefined;
 
       const cleanup = (): void => {
-        if (timer) clearTimeout(timer);
+        if (timer !== undefined) clearTimeout(timer);
         this.off(event, handler as unknown as (...args: unknown[]) => void);
         this.off("disconnect", onDisconnect);
+        options?.signal?.removeEventListener("abort", onAbort);
       };
 
       const handler = ((args: ServerMessages[K]) => {
+        if (settled) return;
+        if (matches && !matches(args)) return;
+        settled = true;
         cleanup();
         resolve(args);
       }) as ServerMessageHandler<K>;
 
-      const onDisconnect = (): void => {
+      const rejectWith = (error: ClientOperationError): void => {
+        if (settled) return;
+        settled = true;
         cleanup();
-        reject(new Error(`Disconnected while waiting for ${String(event)}`));
+        reject(error);
       };
 
-      if (timeout !== undefined) {
-        timer = setTimeout(() => {
-          cleanup();
-          reject(new Error(`Timed out waiting for ${String(event)}`));
-        }, timeout);
+      const onDisconnect = (info?: ClientDisconnectInfo): void => {
+        rejectWith(
+          new ClientOperationError({
+            category: "disconnected",
+            phase: "ready",
+            retryable: !info?.intentional,
+            message: `Disconnected while waiting for ${String(event)}${info?.reason ? `: ${info.reason}` : ""}`,
+          }),
+        );
+      };
+
+      const onAbort = (): void => {
+        rejectWith(
+          new ClientOperationError({
+            category: "aborted",
+            phase: "ready",
+            retryable: true,
+            message: `Cancelled while waiting for ${String(event)}`,
+          }),
+        );
+      };
+
+      if (options?.signal?.aborted) {
+        onAbort();
+        return;
       }
 
-      this.once(event, handler);
+      if (Number.isFinite(timeoutMs)) {
+        timer = setTimeout(() => {
+          rejectWith(
+            new ClientOperationError({
+              category: "operation_timeout",
+              phase: "ready",
+              retryable: true,
+              message: `Timed out waiting for ${String(event)}`,
+            }),
+          );
+        }, timeoutMs);
+      }
+
+      this.on(event, handler);
       this.once("disconnect", onDisconnect);
+      options?.signal?.addEventListener("abort", onAbort, { once: true });
+
+      if (send) {
+        try {
+          send();
+        } catch (cause) {
+          if (cause instanceof ClientOperationError) {
+            rejectWith(cause);
+            return;
+          }
+          rejectWith(
+            new ClientOperationError({
+              category: "transport_error",
+              phase: "ready",
+              retryable: true,
+              message: `Failed to send request for ${String(event)}`,
+              cause,
+            }),
+          );
+        }
+      }
+    });
+  }
+
+  private request<K extends keyof ServerMessages>(
+    event: K,
+    send: () => void,
+    options?: ClientOperationOptions,
+    matches?: ServerMessageMatcher<K>,
+  ): Promise<ServerMessages[K]> {
+    const previous = this.requestTails.get(event);
+    const disconnectEpoch = this.disconnectEpoch;
+    let releaseTurn = (): void => {};
+    const turn = new Promise<void>((resolve) => {
+      releaseTurn = resolve;
+    });
+    const tail = previous ? previous.then(() => turn) : turn;
+    this.requestTails.set(event, tail);
+
+    const operation = previous
+      ? this.waitForRequestTurn(
+          event,
+          previous,
+          disconnectEpoch,
+          options?.signal,
+        ).then(() => this.waitForEvent(event, options, send, matches))
+      : this.waitForEvent(event, options, send, matches);
+
+    return operation.finally(() => {
+      releaseTurn();
+      void tail.finally(() => {
+        if (this.requestTails.get(event) === tail) {
+          this.requestTails.delete(event);
+        }
+      });
+    });
+  }
+
+  private waitForRequestTurn(
+    event: keyof ServerMessages,
+    previous: Promise<void>,
+    disconnectEpoch: number,
+    signal?: AbortSignal,
+  ): Promise<void> {
+    const aborted = (): ClientOperationError =>
+      new ClientOperationError({
+        category: "aborted",
+        phase: "ready",
+        retryable: true,
+        message: `Cancelled before sending request for ${String(event)}`,
+      });
+
+    if (signal?.aborted) return Promise.reject(aborted());
+
+    return new Promise<void>((resolve, reject) => {
+      let settled = false;
+      const cleanup = (): void => {
+        signal?.removeEventListener("abort", onAbort);
+      };
+      const onAbort = (): void => {
+        if (settled) return;
+        settled = true;
+        cleanup();
+        reject(aborted());
+      };
+      signal?.addEventListener("abort", onAbort, { once: true });
+      void previous.then(() => {
+        if (settled) return;
+        settled = true;
+        cleanup();
+        if (this.disconnectEpoch !== disconnectEpoch) {
+          const info = this.lastDisconnectInfo;
+          reject(
+            new ClientOperationError({
+              category: "disconnected",
+              phase: "ready",
+              retryable: !info?.intentional,
+              message: `Disconnected before sending request for ${String(event)}${info?.reason ? `: ${info.reason}` : ""}`,
+            }),
+          );
+          return;
+        }
+        resolve();
+      });
     });
   }
 
@@ -347,13 +635,25 @@ export class Client extends EventEmitter {
     room: number,
     x?: number,
     y?: number,
+    options?: ClientOperationOptions,
   ): Promise<ServerMessages["join_room"]> {
-    this.adapter.joinRoom(room, x, y);
-    return this.waitFor("join_room");
+    return this.request(
+      "join_room",
+      () => this.adapter.joinRoom(room, x, y),
+      options,
+      (response) => response.room === room,
+    );
   }
-  addItem(item: number): Promise<ServerMessages["add_item"]> {
-    this.adapter.addItem(item);
-    return this.waitFor("add_item");
+  addItem(
+    item: number,
+    options?: ClientOperationOptions,
+  ): Promise<ServerMessages["add_item"]> {
+    return this.request(
+      "add_item",
+      () => this.adapter.addItem(item),
+      options,
+      (response) => response.item === item,
+    );
   }
   equipColor(item: number): void {
     this.adapter.equipColor(item);
@@ -385,85 +685,248 @@ export class Client extends EventEmitter {
   buddyRequest(id: number): void {
     this.adapter.buddyRequest(id);
   }
-  buddyAccept(id: number): Promise<ServerMessages["buddy_accept"]> {
-    this.adapter.buddyAccept(id);
-    return this.waitFor("buddy_accept");
+  buddyAccept(
+    id: number,
+    options?: ClientOperationOptions,
+  ): Promise<ServerMessages["buddy_accept"]> {
+    return this.request(
+      "buddy_accept",
+      () => this.adapter.buddyAccept(id),
+      options,
+      (response) => response.id === id,
+    );
   }
-  buddyReject(id: number): Promise<ServerMessages["buddy_reject"]> {
-    this.adapter.buddyReject(id);
-    return this.waitFor("buddy_reject");
+  buddyReject(
+    id: number,
+    options?: ClientOperationOptions,
+  ): Promise<ServerMessages["buddy_reject"]> {
+    return this.request(
+      "buddy_reject",
+      () => this.adapter.buddyReject(id),
+      options,
+      (response) => response.id === id,
+    );
   }
-  buddyRequestSeen(id: number): Promise<ServerMessages["buddy_request_seen"]> {
-    this.adapter.buddyRequestSeen(id);
-    return this.waitFor("buddy_request_seen");
+  buddyRequestSeen(
+    id: number,
+    options?: ClientOperationOptions,
+  ): Promise<ServerMessages["buddy_request_seen"]> {
+    return this.request(
+      "buddy_request_seen",
+      () => this.adapter.buddyRequestSeen(id),
+      options,
+      (response) => response.id === id,
+    );
   }
   getBuddy(
     id: number,
     type: "buddies" | "buddyRequests",
+    options?: ClientOperationOptions,
   ): Promise<ServerMessages["get_buddy"]> {
-    this.adapter.getBuddy(id, type);
-    return this.waitFor("get_buddy");
+    return this.request(
+      "get_buddy",
+      () => this.adapter.getBuddy(id, type),
+      options,
+      (response) => response.id === id && response.type === type,
+    );
+  }
+  findBuddy(
+    id: number,
+    options?: ClientOperationOptions,
+  ): Promise<ServerMessages["buddy_find"]> {
+    return this.request(
+      "buddy_find",
+      () => this.adapter.findBuddy(id),
+      options,
+    );
   }
   removeBuddy(id: number): void {
     this.adapter.removeBuddy(id);
   }
-  addIgnore(id: number): Promise<ServerMessages["ignore_add"]> {
-    this.adapter.addIgnore(id);
-    return this.waitFor("ignore_add");
+  addIgnore(
+    id: number,
+    options?: ClientOperationOptions,
+  ): Promise<ServerMessages["ignore_add"]> {
+    return this.request(
+      "ignore_add",
+      () => this.adapter.addIgnore(id),
+      options,
+      (response) => response.id === id,
+    );
   }
-  removeIgnore(id: number): Promise<ServerMessages["ignore_remove"]> {
-    this.adapter.removeIgnore(id);
-    return this.waitFor("ignore_remove");
+  removeIgnore(
+    id: number,
+    options?: ClientOperationOptions,
+  ): Promise<ServerMessages["ignore_remove"]> {
+    return this.request(
+      "ignore_remove",
+      () => this.adapter.removeIgnore(id),
+      options,
+      (response) => response.id === id,
+    );
   }
-  getPlayer(id: number): Promise<ServerMessages["get_player"]> {
-    this.adapter.getPlayer(id);
-    return this.waitFor("get_player");
+  getPlayer(
+    id: number,
+    options?: ClientOperationOptions,
+  ): Promise<ServerMessages["get_player"]> {
+    return this.request(
+      "get_player",
+      () => this.adapter.getPlayer(id),
+      options,
+      (response) => response.user.id === id,
+    );
   }
-  getAllSlots(): Promise<ServerMessages["slot"]> {
-    this.adapter.getAllSlots();
-    return this.waitFor("slot");
+  getAllSlots(
+    options?: ClientOperationOptions,
+  ): Promise<ServerMessages["slot"]> {
+    return this.request("slot", () => this.adapter.getAllSlots(), options);
   }
-  getMascots(): Promise<ServerMessages["get_mascots"]> {
-    this.adapter.getMascots();
-    return this.waitFor("get_mascots");
+  getMascots(
+    options?: ClientOperationOptions,
+  ): Promise<ServerMessages["get_mascots"]> {
+    return this.request(
+      "get_mascots",
+      () => this.adapter.getMascots(),
+      options,
+    );
   }
   sendPostcard(
     userId: number,
     cardId: string,
+    options?: ClientOperationOptions,
   ): Promise<ServerMessages["send_postcard"]> {
-    this.adapter.sendPostcard(userId, cardId);
-    return this.waitFor("send_postcard");
+    return this.request(
+      "send_postcard",
+      () => this.adapter.sendPostcard(userId, cardId),
+      options,
+    );
   }
-  getStamps(userId: number): Promise<ServerMessages["stamps_result"]> {
-    this.adapter.getStamps(userId);
-    return this.waitFor("stamps_result");
+  getStamps(
+    userId: number,
+    options?: ClientOperationOptions,
+  ): Promise<ServerMessages["stamps_result"]> {
+    return this.request(
+      "stamps_result",
+      () => this.adapter.getStamps(userId),
+      options,
+    );
   }
-  getPostcards(): Promise<ServerMessages["get_postcards"]> {
-    this.adapter.getPostcards();
-    return this.waitFor("get_postcards");
+  getPostcards(
+    options?: ClientOperationOptions,
+  ): Promise<ServerMessages["get_postcards"]> {
+    return this.request(
+      "get_postcards",
+      () => this.adapter.getPostcards(),
+      options,
+    );
   }
-  getIglooOpen(igloo: number): Promise<ServerMessages["get_igloo_open"]> {
-    this.adapter.getIglooOpen(igloo);
-    return this.waitFor("get_igloo_open");
+  getIglooOpen(
+    igloo: number,
+    options?: ClientOperationOptions,
+  ): Promise<ServerMessages["get_igloo_open"]> {
+    return this.request(
+      "get_igloo_open",
+      () => this.adapter.getIglooOpen(igloo),
+      options,
+    );
   }
-  getIgloos(): Promise<ServerMessages["get_igloos"]> {
-    this.adapter.getIgloos();
-    return this.waitFor("get_igloos");
+  getIgloos(
+    options?: ClientOperationOptions,
+  ): Promise<ServerMessages["get_igloos"]> {
+    return this.request("get_igloos", () => this.adapter.getIgloos(), options);
   }
-  getPuffles(userId: number): Promise<ServerMessages["get_puffles"]> {
-    this.adapter.getPuffles(userId);
-    return this.waitFor("get_puffles");
+  getPuffles(
+    userId: number,
+    options?: ClientOperationOptions & { isBackyard?: boolean },
+  ): Promise<ServerMessages["get_puffles"]> {
+    return this.request(
+      "get_puffles",
+      () => this.adapter.getPuffles(userId, options?.isBackyard),
+      options,
+      (response) => response.userId === userId,
+    );
+  }
+  getAllPuffles(
+    options?: ClientOperationOptions,
+  ): Promise<ServerMessages["get_all_puffles"]> {
+    return this.request(
+      "get_all_puffles",
+      () => this.adapter.getAllPuffles(),
+      options,
+    );
+  }
+  getPuffleWellbeing(
+    puffle: number,
+    options?: ClientOperationOptions,
+  ): Promise<ServerMessages["get_wellbeing"]> {
+    return this.request(
+      "get_wellbeing",
+      () => this.adapter.getPuffleWellbeing(puffle),
+      options,
+      (response) => response.puffleId === puffle,
+    );
+  }
+  playPuffle(puffle: number): void {
+    this.adapter.playPuffle(puffle);
+  }
+  restPuffle(puffle: number): void {
+    this.adapter.restPuffle(puffle);
+  }
+  buyPuffleItem(
+    puffleId: number,
+    item: number,
+    options?: ClientOperationOptions,
+  ): Promise<ServerMessages["buy_puffle_item"]> {
+    return this.request(
+      "buy_puffle_item",
+      () => this.adapter.buyPuffleItem(puffleId, item),
+      options,
+      (response) => response.puffleId === puffleId && response.item === item,
+    );
+  }
+  walkPuffle(
+    puffle: number,
+    options?: ClientOperationOptions,
+  ): Promise<ServerMessages["get_walking_puffle"]> {
+    return this.request(
+      "get_walking_puffle",
+      () => this.adapter.walkPuffle(puffle),
+      options,
+      (response) => response.puffle.id === puffle,
+    );
+  }
+  /** CPJourney sends tower_init after its walking-puffle acknowledgement. */
+  initializePuffleTower(): void {
+    this.adapter.initializePuffleTower();
+  }
+  getBackyardSupplies(
+    options?: ClientOperationOptions,
+  ): Promise<ServerMessages["backyard_supplies"]> {
+    return this.request(
+      "backyard_supplies",
+      () => this.adapter.getBackyardSupplies(),
+      options,
+    );
   }
   adoptPuffle(
     type: number,
     name: string,
+    options?: ClientOperationOptions,
   ): Promise<ServerMessages["adopt_puffle"]> {
-    this.adapter.adoptPuffle(type, name);
-    return this.waitFor("adopt_puffle");
+    return this.request(
+      "adopt_puffle",
+      () => this.adapter.adoptPuffle(type, name),
+      options,
+    );
   }
-  getIglooLikes(): Promise<ServerMessages["get_igloo_likes"]> {
-    this.adapter.getIglooLikes();
-    return this.waitFor("get_igloo_likes");
+  getIglooLikes(
+    options?: ClientOperationOptions,
+  ): Promise<ServerMessages["get_igloo_likes"]> {
+    return this.request(
+      "get_igloo_likes",
+      () => this.adapter.getIglooLikes(),
+      options,
+    );
   }
   checkPuffleSprite(puffleSprite: boolean): void {
     this.adapter.checkPuffleSprite(puffleSprite);
@@ -472,17 +935,129 @@ export class Client extends EventEmitter {
     igloo: number,
     x?: number,
     y?: number,
+    options?: ClientOperationOptions,
   ): Promise<ServerMessages["join_igloo"]> {
-    this.adapter.joinIgloo(igloo, x, y);
-    return this.waitFor("join_igloo");
+    return this.request(
+      "join_igloo",
+      () => this.adapter.joinIgloo(igloo, x, y),
+      options,
+      (response) => response.igloo === igloo,
+    );
   }
-  gameOver(coins: number): Promise<ServerMessages["game_over"]> {
-    this.adapter.gameOver(coins);
-    return this.waitFor("game_over");
+  getStoreMusic(
+    options?: ClientOperationOptions,
+  ): Promise<ServerMessages["get_store_music"]> {
+    return this.request(
+      "get_store_music",
+      () => this.adapter.getStoreMusic(),
+      options,
+    );
   }
-  collectStamp(stamp: number): Promise<ServerMessages["stamp_earned"]> {
-    this.adapter.collectStamp(stamp);
-    return this.waitFor("stamp_earned");
+  buyMusic(
+    music: string,
+    options?: ClientOperationOptions,
+  ): Promise<ServerMessages["add_music"]> {
+    return this.request(
+      "add_music",
+      () => this.adapter.buyMusic(music),
+      options,
+      (response) => response.music === music,
+    );
+  }
+  getIglooStoreItems(
+    options?: ClientOperationOptions,
+  ): Promise<ServerMessages["get_igloostore_items"]> {
+    return this.request(
+      "get_igloostore_items",
+      () => this.adapter.getIglooStoreItems(),
+      options,
+    );
+  }
+  buyFurniture(
+    furniture: string,
+    amount = 1,
+    options?: ClientOperationOptions,
+  ): Promise<ServerMessages["add_furniture"]> {
+    return this.request(
+      "add_furniture",
+      () => this.adapter.buyFurniture(furniture, amount),
+      options,
+      (response) =>
+        response.furniture === furniture && response.amount === amount,
+    );
+  }
+  updateIglooMusic(
+    music: string,
+    options?: ClientOperationOptions,
+  ): Promise<ServerMessages["update_music"]> {
+    return this.request(
+      "update_music",
+      () => this.adapter.updateIglooMusic(music),
+      options,
+      (response) => response.music === music,
+    );
+  }
+  updateIglooFurniture(
+    furniture: ClientMessages["update_furniture"]["furniture"],
+  ): void {
+    this.adapter.updateIglooFurniture(furniture);
+  }
+  autoUpdateIglooFurniture(
+    furniture: ClientMessages["update_furniture_auto"]["furniture"],
+  ): void {
+    this.adapter.autoUpdateIglooFurniture(furniture);
+  }
+  updateIglooType(type: number): void {
+    this.adapter.updateIglooType(type);
+  }
+  openIgloo(
+    options?: ClientOperationOptions,
+  ): Promise<ServerMessages["igloo_open_status"]> {
+    return this.request(
+      "igloo_open_status",
+      () => this.adapter.openIgloo(),
+      options,
+    );
+  }
+  closeIglooBounds(
+    options?: ClientOperationOptions,
+  ): Promise<ServerMessages["igloo_bounds_status"]> {
+    return this.request(
+      "igloo_bounds_status",
+      () => this.adapter.closeIglooBounds(),
+      options,
+    );
+  }
+  likeIgloo(
+    options?: ClientOperationOptions,
+  ): Promise<ServerMessages["igloo_liked"]> {
+    return this.request("igloo_liked", () => this.adapter.likeIgloo(), options);
+  }
+  openIglooEditor(): void {
+    this.adapter.openIglooEditor();
+  }
+  closeIglooEditor(): void {
+    this.adapter.closeIglooEditor();
+  }
+  gameOver(
+    coins: number,
+    options?: ClientOperationOptions,
+  ): Promise<ServerMessages["game_over"]> {
+    return this.request(
+      "game_over",
+      () => this.adapter.gameOver(coins),
+      options,
+    );
+  }
+  collectStamp(
+    stamp: number,
+    options?: ClientOperationOptions,
+  ): Promise<ServerMessages["stamp_earned"]> {
+    return this.request(
+      "stamp_earned",
+      () => this.adapter.collectStamp(stamp),
+      options,
+    );
   }
 
   sleep(ms: number): Promise<void> {
@@ -491,8 +1066,46 @@ export class Client extends EventEmitter {
 
   disconnect(): void {
     this.log?.("[disconnect] closing connection");
+    this.intentionalDisconnect = true;
+    this.reportLifecycle("disconnecting");
     this.adapter.disconnect();
+    this.handleAdapterDisconnect("client disconnect");
+  }
+
+  private reportLifecycle(
+    phase: Parameters<
+      NonNullable<ConnectOptions["onLifecycleUpdate"]>
+    >[0]["phase"],
+  ): void {
+    this.lifecycleReporter?.({ phase, occurredAt: Date.now() });
+  }
+
+  private handleAdapterDisconnect(reason: string | null): void {
+    if (this.disconnectNotified) return;
+    this.disconnectNotified = true;
+    const info: ClientDisconnectInfo = {
+      intentional: this.intentionalDisconnect,
+      reason,
+      occurredAt: Date.now(),
+    };
+    this.disconnectEpoch += 1;
+    this.lastDisconnectInfo = info;
+    if (!info.intentional && !this.connected) {
+      this.connectionFailure = new ClientOperationError({
+        category: "disconnected",
+        phase: "awaiting_initial_state",
+        retryable: true,
+        message: `Disconnected before initial state${reason ? `: ${reason}` : ""}`,
+      });
+    }
+    this.log?.(
+      "[disconnect]",
+      info.intentional ? "connection closed" : "connection lost",
+      reason ?? "",
+    );
     this.cleanup();
+    this.reportLifecycle("disconnected");
+    this.emit("disconnect", info);
   }
 
   private cleanup(): void {
@@ -502,7 +1115,7 @@ export class Client extends EventEmitter {
     this.users.clear();
   }
 
-  private handleMessage(msg: MessagePayload): void {
+  private handleMessage(msg: AdapterMessage): void {
     const { action, args } = msg;
     let emitArgs: unknown = args;
 
@@ -596,16 +1209,94 @@ export class Client extends EventEmitter {
         }
         break;
       }
+      case "walk_puffle": {
+        const id = args.user as number;
+        const user = this.users.get(id);
+        if (user) {
+          user.walking = args.puffle as number;
+          user.meta.walkingPuffleType = args.type as number;
+        }
+        break;
+      }
+      case "stop_walking": {
+        const id = args.user as number;
+        const user = this.users.get(id);
+        if (user) {
+          user.walking = 0;
+          user.meta.walkingPuffleType = undefined;
+        }
+        break;
+      }
+      case "igloo_open_status": {
+        const status = args.status as number;
+        if (this.player) {
+          this.player.meta.iglooOpen = status;
+          const roomUser = this.users.get(this.player.id);
+          if (roomUser) roomUser.meta.iglooOpen = status;
+        }
+        break;
+      }
+      case "add_item":
+      case "add_furniture":
+      case "add_music":
+      case "adopt_puffle":
+      case "buy_puffle_item":
+      case "game_over": {
+        // These captured coin values are CPJourney totals. Do not impose that
+        // interpretation on adapters that reuse an action name differently.
+        if (this.adapter.id !== "CPJourney") break;
+        const coins = args.coins;
+        if (this.player && typeof coins === "number") {
+          this.player.coins = coins;
+        }
+        if (
+          action === "add_item" &&
+          this.player &&
+          typeof args.item === "number" &&
+          !this.player.inventory.includes(args.item)
+        ) {
+          this.player.inventory.push(args.item);
+        }
+        break;
+      }
       case "kick": {
         const reason = (args as { reason?: string }).reason ?? "unknown";
         this.log?.("[kick]", reason);
+        if (!this.connected) {
+          this.connectionFailure = new ClientOperationError({
+            category: "kicked",
+            phase: "awaiting_initial_state",
+            retryable: true,
+            message: `Kicked before initial state: ${reason}`,
+          });
+        }
         this.cleanup();
         break;
       }
       case "close_with_error": {
         const error = (args as { error?: string }).error ?? "unknown";
         this.log?.("[kick]", error);
+        if (!this.connected) {
+          this.connectionFailure = new ClientOperationError({
+            category: "kicked",
+            phase: "awaiting_initial_state",
+            retryable: true,
+            message: `Connection closed before initial state: ${error}`,
+          });
+        }
         this.cleanup();
+        break;
+      }
+      case "error": {
+        const error = (args as { error?: string | number }).error ?? "unknown";
+        if (!this.connected) {
+          this.connectionFailure = new ClientOperationError({
+            category: "server_error",
+            phase: "awaiting_initial_state",
+            retryable: true,
+            message: `Server error before initial state: ${String(error)}`,
+          });
+        }
         break;
       }
       default: {

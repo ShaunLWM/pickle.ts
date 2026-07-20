@@ -1,6 +1,11 @@
 import { createCipheriv, createDecipheriv, randomBytes } from "node:crypto";
 import { io, type Socket } from "socket.io-client";
 import nacl from "tweetnacl";
+import { ClientOperationError } from "../errors.js";
+import {
+  type ClientOperationOptions,
+  DEFAULT_CLIENT_CONNECTION_TIMEOUTS,
+} from "../lifecycle.js";
 import type {
   LoginOptions,
   LoginResult,
@@ -108,19 +113,38 @@ class Encryptor {
   }
 }
 
-function performHandshake(socket: Socket, encryptor: Encryptor): Promise<void> {
+function performHandshake(
+  socket: Socket,
+  encryptor: Encryptor,
+  signal: AbortSignal,
+): Promise<void> {
   return new Promise((resolve, reject) => {
-    const timeout = setTimeout(() => {
-      reject(new Error("Handshake timed out"));
-    }, 10_000);
+    let settled = false;
 
-    socket.once(
-      "handshake",
-      (encryptedKey: string, serverPubKeyB64: string) => {
-        clearTimeout(timeout);
+    const cleanup = (): void => {
+      socket.off("handshake", onHandshake);
+      signal.removeEventListener("abort", onAbort);
+    };
+
+    const fail = (error: Error): void => {
+      if (settled) return;
+      settled = true;
+      cleanup();
+      reject(error);
+    };
+
+    const onAbort = (): void => {
+      fail(new Error("Handshake cancelled"));
+    };
+
+    const onHandshake = (
+      encryptedKey: string,
+      serverPubKeyB64: string,
+    ): void => {
+      try {
         const raw = encryptor.acquireKey(encryptedKey, serverPubKeyB64);
         if (!raw) {
-          reject(new Error("Failed to decrypt handshake key"));
+          fail(new Error("Failed to decrypt handshake key"));
           return;
         }
 
@@ -130,14 +154,27 @@ function performHandshake(socket: Socket, encryptor: Encryptor): Promise<void> {
           typeof parsed.time === "number" &&
           Math.abs(Date.now() - parsed.time) > 300_000
         ) {
-          reject(new Error("Server time desync"));
+          fail(new Error("Server time desync"));
           return;
         }
 
         encryptor.setKey(parsed.key);
+        if (settled) return;
+        settled = true;
+        cleanup();
         resolve();
-      },
-    );
+      } catch (cause) {
+        fail(cause instanceof Error ? cause : new Error("Handshake failed"));
+      }
+    };
+
+    if (signal.aborted) {
+      onAbort();
+      return;
+    }
+
+    socket.on("handshake", onHandshake);
+    signal.addEventListener("abort", onAbort, { once: true });
 
     socket.emit("handshake", encryptor.publicKey);
   });
@@ -172,83 +209,223 @@ export class NewcpAdapter extends BaseAdapter {
   private encryptor = new Encryptor();
   private worlds: CrumbsWorlds | null = null;
 
-  async login(options: LoginOptions | TokenLoginOptions): Promise<LoginResult> {
-    if (!this.worlds) {
-      await this.loadWorlds();
+  async login(
+    options: LoginOptions | TokenLoginOptions,
+    operationOptions?: ClientOperationOptions,
+  ): Promise<LoginResult> {
+    this.resetLoginState();
+    const controller = new AbortController();
+    let timedOut = false;
+    const onCallerAbort = (): void => controller.abort();
+    if (operationOptions?.signal?.aborted) {
+      throw new ClientOperationError({
+        category: "aborted",
+        phase: "transport_connecting",
+        retryable: true,
+        message: "Login cancelled",
+      });
     }
-
-    const loginWorld = Object.values(this.worlds ?? {}).find((w) => w.login);
-    if (!loginWorld) throw new Error("Login world not found in crumbs");
-
-    const loginSocket = this.createSocket(loginWorld.host, loginWorld.path);
-    this.encryptor = new Encryptor();
-
-    const result = await new Promise<LoginResult>((resolve, reject) => {
-      const timeout = setTimeout(() => {
-        loginSocket.disconnect();
-        reject(new Error("Login timed out"));
-      }, 15_000);
-
-      loginSocket.on("connect", async () => {
-        try {
-          await performHandshake(loginSocket, this.encryptor);
-
-          const args =
-            "token" in options
-              ? { username: options.username, token: options.token }
-              : { username: options.username, password: options.password };
-
-          const encrypted = this.encryptor.encode({ action: "login", args });
-          loginSocket.emit("message", encrypted);
-        } catch (err) {
-          clearTimeout(timeout);
-          loginSocket.disconnect();
-          reject(err);
-        }
-      });
-
-      loginSocket.on("message", (msg: unknown) => {
-        try {
-          const decoded = this.encryptor.decode(msg);
-          if (decoded.action !== "login") return;
-
-          clearTimeout(timeout);
-          loginSocket.disconnect();
-
-          const response = decoded.args as unknown as LoginResponse;
-
-          if (!response.success) {
-            this.loginMessage = response.message ?? null;
-            reject(new Error(response.message ?? "Login failed"));
-            return;
-          }
-
-          const servers: ServerInfo[] = Object.entries(
-            response.populations ?? {},
-          ).map(([name, population]) => ({ name, population }));
-
-          resolve({
-            servers,
-            key: response.key,
-            username: response.username,
-            moderator: response.moderator ?? false,
-            buddyWorlds: response.buddyWorlds ?? [],
-          });
-        } catch (err) {
-          clearTimeout(timeout);
-          loginSocket.disconnect();
-          reject(err);
-        }
-      });
-
-      loginSocket.on("connect_error", (err: Error) => {
-        clearTimeout(timeout);
-        loginSocket.disconnect();
-        reject(new Error(`Login connection failed: ${err.message}`));
-      });
+    operationOptions?.signal?.addEventListener("abort", onCallerAbort, {
+      once: true,
     });
+    const timeout = setTimeout(() => {
+      timedOut = true;
+      controller.abort();
+    }, operationOptions?.timeoutMs ??
+      DEFAULT_CLIENT_CONNECTION_TIMEOUTS.loginMs);
 
-    return result;
+    let loginSocket: Socket | null = null;
+    try {
+      if (!this.worlds) {
+        await this.loadWorlds(controller.signal);
+      }
+
+      const loginWorld = Object.values(this.worlds ?? {}).find((w) => w.login);
+      if (!loginWorld) {
+        throw new ClientOperationError({
+          category: "login_rejected",
+          phase: "transport_connecting",
+          retryable: false,
+          message: "Login world not found in crumbs",
+        });
+      }
+
+      loginSocket = this.createSocket(loginWorld.host, loginWorld.path);
+      this.encryptor = new Encryptor();
+
+      return await new Promise<LoginResult>((resolve, reject) => {
+        let settled = false;
+
+        const cleanup = (): void => {
+          loginSocket?.off("connect", onConnect);
+          loginSocket?.off("message", onMessage);
+          loginSocket?.off("connect_error", onConnectError);
+          loginSocket?.off("disconnect", onDisconnect);
+          controller.signal.removeEventListener("abort", onAbort);
+        };
+
+        const fail = (error: ClientOperationError): void => {
+          if (settled) return;
+          settled = true;
+          cleanup();
+          loginSocket?.disconnect();
+          reject(error);
+        };
+
+        const succeed = (result: LoginResult): void => {
+          if (settled) return;
+          settled = true;
+          cleanup();
+          loginSocket?.disconnect();
+          resolve(result);
+        };
+
+        const onConnect = async (): Promise<void> => {
+          try {
+            if (!loginSocket) return;
+            await performHandshake(
+              loginSocket,
+              this.encryptor,
+              controller.signal,
+            );
+            const args =
+              "token" in options
+                ? { username: options.username, token: options.token }
+                : { username: options.username, password: options.password };
+            const encrypted = this.encryptor.encode({ action: "login", args });
+            loginSocket.emit("message", encrypted);
+          } catch (cause) {
+            if (settled) return;
+            fail(
+              new ClientOperationError({
+                category: controller.signal.aborted
+                  ? timedOut
+                    ? "login_timeout"
+                    : "aborted"
+                  : "transport_error",
+                phase: "transport_connecting",
+                retryable: true,
+                message: controller.signal.aborted
+                  ? timedOut
+                    ? "Login timed out"
+                    : "Login cancelled"
+                  : cause instanceof Error
+                    ? `Login handshake failed: ${cause.message}`
+                    : "Login handshake failed",
+                cause,
+              }),
+            );
+          }
+        };
+
+        const onMessage = (message: unknown): void => {
+          try {
+            const decoded = this.encryptor.decode(message);
+            if (decoded.action !== "login") return;
+            const response = decoded.args as unknown as LoginResponse;
+            if (!response.success) {
+              this.loginMessage = response.message ?? null;
+              const responseMessage = response.message ?? "Login failed";
+              const invalidCredentials =
+                /password|credential|incorrect|invalid login/i.test(
+                  responseMessage,
+                );
+              fail(
+                new ClientOperationError({
+                  category: invalidCredentials
+                    ? "invalid_credentials"
+                    : "login_rejected",
+                  phase: "transport_connecting",
+                  retryable: false,
+                  message: responseMessage,
+                }),
+              );
+              return;
+            }
+
+            const servers: ServerInfo[] = Object.entries(
+              response.populations ?? {},
+            ).map(([name, population]) => ({ name, population }));
+            succeed({
+              servers,
+              key: response.key,
+              username: response.username,
+              moderator: response.moderator ?? false,
+              buddyWorlds: response.buddyWorlds ?? [],
+            });
+          } catch (cause) {
+            fail(
+              new ClientOperationError({
+                category: "transport_error",
+                phase: "transport_connecting",
+                retryable: true,
+                message: "Invalid login response",
+                cause,
+              }),
+            );
+          }
+        };
+
+        const onConnectError = (cause: Error): void => {
+          fail(
+            new ClientOperationError({
+              category: "transport_error",
+              phase: "transport_connecting",
+              retryable: true,
+              message: `Login connection failed: ${cause.message}`,
+              cause,
+            }),
+          );
+        };
+        const onDisconnect = (reason: string): void => {
+          fail(
+            new ClientOperationError({
+              category: "transport_error",
+              phase: "transport_connecting",
+              retryable: true,
+              message: `Login connection closed unexpectedly${reason ? `: ${reason}` : ""}`,
+            }),
+          );
+        };
+        const onAbort = (): void => {
+          fail(
+            new ClientOperationError({
+              category: timedOut ? "login_timeout" : "aborted",
+              phase: "transport_connecting",
+              retryable: true,
+              message: timedOut ? "Login timed out" : "Login cancelled",
+            }),
+          );
+        };
+
+        loginSocket?.on("connect", onConnect);
+        loginSocket?.on("message", onMessage);
+        loginSocket?.on("connect_error", onConnectError);
+        loginSocket?.on("disconnect", onDisconnect);
+        controller.signal.addEventListener("abort", onAbort, { once: true });
+      });
+    } catch (cause) {
+      if (cause instanceof ClientOperationError) throw cause;
+      if (controller.signal.aborted) {
+        throw new ClientOperationError({
+          category: timedOut ? "login_timeout" : "aborted",
+          phase: "transport_connecting",
+          retryable: true,
+          message: timedOut ? "Login timed out" : "Login cancelled",
+          cause,
+        });
+      }
+      throw new ClientOperationError({
+        category: "transport_error",
+        phase: "transport_connecting",
+        retryable: true,
+        message: cause instanceof Error ? cause.message : "Login failed",
+        cause,
+      });
+    } finally {
+      clearTimeout(timeout);
+      operationOptions?.signal?.removeEventListener("abort", onCallerAbort);
+    }
   }
 
   async connect(
@@ -257,7 +434,7 @@ export class NewcpAdapter extends BaseAdapter {
     options?: ConnectOptions,
   ): Promise<Socket> {
     if (!this.worlds) {
-      await this.loadWorlds();
+      await this.loadWorlds(options?.signal);
     }
 
     const worldConfig = this.worlds?.[serverName];
@@ -265,18 +442,101 @@ export class NewcpAdapter extends BaseAdapter {
       throw new Error(`World config not found for: ${serverName}`);
 
     this.encryptor = new Encryptor();
+    this.reportLifecycle(options, "transport_connecting");
     const gameSocket = this.createSocket(worldConfig.host, worldConfig.path);
     this.socket = gameSocket;
+    const timeouts = this.connectionTimeouts(options);
+    const phaseController = new AbortController();
+
+    const forwardMessage = (message: unknown): void => {
+      try {
+        const decoded = this.encryptor.decode(message);
+        const action = decoded.action;
+        if (typeof action !== "string") return;
+        if (action === "game_auth" || action === "wait_queue_update") return;
+        options?.onMessage?.({
+          action,
+          args: (decoded.args as Record<string, unknown> | undefined) ?? {},
+        });
+      } catch {
+        // Malformed messages are ignored by the protocol adapter.
+      }
+    };
+    const forwardDisconnect = (reason: string): void => {
+      options?.onDisconnect?.(reason ?? null);
+    };
+    gameSocket.on("message", forwardMessage);
+    gameSocket.on("disconnect", forwardDisconnect);
 
     await new Promise<void>((resolve, reject) => {
-      const timeout = setTimeout(() => {
-        gameSocket.disconnect();
-        reject(new Error("Game connection timed out"));
-      }, 15_000);
+      let settled = false;
+      let timer: ReturnType<typeof setTimeout> | undefined;
+      let activePhase: "transport_connecting" | "authenticating" | "queueing" =
+        "transport_connecting";
 
-      gameSocket.on("connect", async () => {
+      const cleanup = (): void => {
+        if (timer !== undefined) clearTimeout(timer);
+        gameSocket.off("connect", onConnect);
+        gameSocket.off("message", onMessage);
+        gameSocket.off("connect_error", onConnectError);
+        gameSocket.off("disconnect", onDisconnect);
+        options?.signal?.removeEventListener("abort", onAbort);
+      };
+
+      const fail = (error: ClientOperationError): void => {
+        if (settled) return;
+        settled = true;
+        cleanup();
+        phaseController.abort();
+        gameSocket.off("message", forwardMessage);
+        gameSocket.off("disconnect", forwardDisconnect);
+        gameSocket.disconnect();
+        this.socket = null;
+        reject(error);
+      };
+
+      const succeed = (): void => {
+        if (settled) return;
+        settled = true;
+        cleanup();
+        resolve();
+      };
+
+      const startTimer = (
+        timeoutMs: number,
+        category: "transport_error" | "auth_timeout" | "queue_timeout",
+        phase: "transport_connecting" | "authenticating" | "queueing",
+        message: string,
+      ): void => {
+        if (timer !== undefined) clearTimeout(timer);
+        timer = setTimeout(() => {
+          fail(
+            new ClientOperationError({
+              category,
+              phase,
+              retryable: true,
+              message,
+            }),
+          );
+        }, timeoutMs);
+      };
+
+      const onConnect = async (): Promise<void> => {
+        activePhase = "authenticating";
+        this.reportLifecycle(options, "authenticating");
+        startTimer(
+          timeouts.authenticationMs,
+          "auth_timeout",
+          "authenticating",
+          "Game authentication timed out",
+        );
         try {
-          await performHandshake(gameSocket, this.encryptor);
+          await performHandshake(
+            gameSocket,
+            this.encryptor,
+            phaseController.signal,
+          );
+          if (settled) return;
 
           const encrypted = this.encryptor.encode({
             action: "game_auth",
@@ -287,51 +547,118 @@ export class NewcpAdapter extends BaseAdapter {
             },
           });
           gameSocket.emit("message", encrypted);
-        } catch (err) {
-          clearTimeout(timeout);
-          gameSocket.disconnect();
-          reject(err);
+        } catch (cause) {
+          if (settled) return;
+          fail(
+            new ClientOperationError({
+              category: "transport_error",
+              phase: "authenticating",
+              retryable: true,
+              message:
+                cause instanceof Error
+                  ? `Game handshake failed: ${cause.message}`
+                  : "Game handshake failed",
+              cause,
+            }),
+          );
         }
-      });
+      };
 
-      gameSocket.on("message", (msg: unknown) => {
+      const onMessage = (message: unknown): void => {
         try {
-          const decoded = this.encryptor.decode(msg);
+          const decoded = this.encryptor.decode(message);
 
           switch (decoded.action) {
             case "wait_queue_update": {
-              options?.onQueueUpdate?.(decoded.args as unknown as QueueUpdate);
+              const update = decoded.args as unknown as QueueUpdate;
+              activePhase = "queueing";
+              this.reportLifecycle(options, "queueing", update);
+              options?.onQueueUpdate?.(update);
+              startTimer(
+                timeouts.queueMs,
+                "queue_timeout",
+                "queueing",
+                "Game server queue stopped responding",
+              );
               break;
             }
             case "game_auth": {
               const response = decoded.args as unknown as GameAuthResponse;
               if (!response.success) {
-                clearTimeout(timeout);
-                gameSocket.disconnect();
-                reject(new Error("Game auth failed"));
+                fail(
+                  new ClientOperationError({
+                    category: "auth_failed",
+                    phase: "authenticating",
+                    retryable: true,
+                    message: "Game authentication failed",
+                  }),
+                );
                 return;
               }
 
+              this.reportLifecycle(options, "joining_session");
               const joinEncrypted = this.encryptor.encode({
                 action: "join_server",
                 args: {},
               });
               gameSocket.emit("message", joinEncrypted);
-              clearTimeout(timeout);
-              resolve();
+              succeed();
               break;
             }
           }
         } catch {
           // Ignore decode errors during auth phase
         }
-      });
+      };
 
-      gameSocket.on("connect_error", (err: Error) => {
-        clearTimeout(timeout);
-        gameSocket.disconnect();
-        reject(new Error(`Game connection failed: ${err.message}`));
-      });
+      const onConnectError = (cause: Error): void => {
+        fail(
+          new ClientOperationError({
+            category: "transport_error",
+            phase: "transport_connecting",
+            retryable: true,
+            message: `Game connection failed: ${cause.message}`,
+            cause,
+          }),
+        );
+      };
+      const onDisconnect = (reason: string): void => {
+        fail(
+          new ClientOperationError({
+            category: "transport_error",
+            phase: activePhase,
+            retryable: true,
+            message: `Disconnected before game authentication${reason ? `: ${reason}` : ""}`,
+          }),
+        );
+      };
+      const onAbort = (): void => {
+        fail(
+          new ClientOperationError({
+            category: "aborted",
+            phase: activePhase,
+            retryable: true,
+            message: "Game connection cancelled",
+          }),
+        );
+      };
+
+      if (options?.signal?.aborted) {
+        onAbort();
+        return;
+      }
+
+      gameSocket.on("connect", onConnect);
+      gameSocket.on("message", onMessage);
+      gameSocket.on("connect_error", onConnectError);
+      gameSocket.on("disconnect", onDisconnect);
+      options?.signal?.addEventListener("abort", onAbort, { once: true });
+      startTimer(
+        timeouts.transportMs,
+        "transport_error",
+        "transport_connecting",
+        "Game transport connection timed out",
+      );
     });
 
     return wrapSocket(gameSocket, this.encryptor);
@@ -489,7 +816,7 @@ export class NewcpAdapter extends BaseAdapter {
     this.send("join_igloo", { igloo, x: x ?? 0, y: y ?? 0 });
   }
 
-  private createSocket(host: string, path: string): Socket {
+  protected createSocket(host: string, path: string): Socket {
     return io(host, {
       ...this.socketIoOptions(host),
       path,
@@ -498,9 +825,10 @@ export class NewcpAdapter extends BaseAdapter {
     });
   }
 
-  private async loadWorlds(): Promise<void> {
+  private async loadWorlds(signal?: AbortSignal): Promise<void> {
     const resp = await fetch(CRUMBS_URL, {
       headers: this.connectionHeaders(CRUMBS_URL),
+      signal,
     });
     if (!resp.ok) throw new Error(`Failed to fetch crumbs: ${resp.status}`);
     const crumbs = (await resp.json()) as { worlds: CrumbsWorlds };

@@ -6,6 +6,14 @@ import {
   resolveConnectionOrigin,
   resolveConnectionProfile,
 } from "../connection-profile.js";
+import { ClientOperationError } from "../errors.js";
+import {
+  type ClientConnectionTimeouts,
+  type ClientLifecyclePhase,
+  type ClientLifecycleUpdate,
+  type ClientOperationOptions,
+  DEFAULT_CLIENT_CONNECTION_TIMEOUTS,
+} from "../lifecycle.js";
 import type {
   LoginOptions,
   LoginResult,
@@ -23,8 +31,20 @@ type SocketIoConnectionOptions = Partial<ManagerOptions & SocketOptions> & {
   origin?: string;
 };
 
+export type AdapterMessage = {
+  action: string;
+  args: Record<string, unknown>;
+};
+
 export type ConnectOptions = {
+  signal?: AbortSignal;
+  timeouts?: Partial<ClientConnectionTimeouts>;
   onQueueUpdate?: (update: QueueUpdate) => void;
+  onLifecycleUpdate?: (update: ClientLifecycleUpdate) => void;
+  /** @internal Normalized message delivery installed before session join. */
+  onMessage?: (message: AdapterMessage) => void;
+  /** @internal Transport disconnect delivery installed before session join. */
+  onDisconnect?: (reason: string | null) => void;
 };
 
 export abstract class BaseAdapter {
@@ -39,6 +59,7 @@ export abstract class BaseAdapter {
 
   abstract login(
     options: LoginOptions | TokenLoginOptions,
+    operationOptions?: ClientOperationOptions,
   ): Promise<LoginResult>;
   abstract connect(
     serverName: string,
@@ -47,6 +68,41 @@ export abstract class BaseAdapter {
   ): Promise<Socket>;
   abstract disconnect(): void;
   abstract send(action: string, args: Record<string, unknown>): void;
+
+  protected connectionTimeouts(
+    options?: ConnectOptions,
+  ): ClientConnectionTimeouts {
+    return {
+      ...DEFAULT_CLIENT_CONNECTION_TIMEOUTS,
+      ...options?.timeouts,
+    };
+  }
+
+  protected reportLifecycle(
+    options: ConnectOptions | undefined,
+    phase: ClientLifecyclePhase,
+    queue?: QueueUpdate,
+  ): void {
+    options?.onLifecycleUpdate?.({
+      phase,
+      occurredAt: Date.now(),
+      ...(queue ? { queue } : {}),
+    });
+  }
+
+  protected resetLoginState(): void {
+    this.loginMessage = null;
+    this.loginStatus = "active";
+  }
+
+  protected unsupportedOperation(operation: string): ClientOperationError {
+    return new ClientOperationError({
+      category: "unsupported_operation",
+      phase: "ready",
+      retryable: false,
+      message: `${this.id} does not support ${operation}`,
+    });
+  }
 
   protected socketIoOptions(
     defaultUrlOrOrigin: string,
@@ -91,11 +147,11 @@ export abstract class BaseAdapter {
   }
 
   normalizeUser(_raw: Record<string, unknown>): RoomUser {
-    throw new Error("Not implemented: normalizeUser");
+    throw this.unsupportedOperation("normalizeUser");
   }
 
   normalizePlayer(_raw: Record<string, unknown>): PlayerData {
-    throw new Error("Not implemented: normalizePlayer");
+    throw this.unsupportedOperation("normalizePlayer");
   }
 
   protected extractAppearance(raw: Record<string, unknown>): PlayerAppearance {
@@ -113,202 +169,310 @@ export abstract class BaseAdapter {
   }
 
   sendMessage(_message: string): void {
-    throw new Error("Not implemented: sendMessage");
+    throw this.unsupportedOperation("sendMessage");
   }
 
   sendEmote(_emote: number): void {
-    throw new Error("Not implemented: sendEmote");
+    throw this.unsupportedOperation("sendEmote");
   }
 
   sendSafe(_safe: number): void {
-    throw new Error("Not implemented: sendSafe");
+    throw this.unsupportedOperation("sendSafe");
   }
 
   walk(_x: number, _y: number): void {
-    throw new Error("Not implemented: walk");
+    throw this.unsupportedOperation("walk");
   }
 
   sendFrame(_frame: number, _set?: boolean): void {
-    throw new Error("Not implemented: sendFrame");
+    throw this.unsupportedOperation("sendFrame");
   }
 
   snowball(_x: number, _y: number): void {
-    throw new Error("Not implemented: snowball");
+    throw this.unsupportedOperation("snowball");
   }
 
   joinRoom(_room: number, _x?: number, _y?: number): void {
-    throw new Error("Not implemented: joinRoom");
+    throw this.unsupportedOperation("joinRoom");
   }
 
   addItem(_item: number): void {
-    throw new Error("Not implemented: addItem");
+    throw this.unsupportedOperation("addItem");
   }
 
   equipColor(_item: number): void {
-    throw new Error("Not implemented: equipColor");
+    throw this.unsupportedOperation("equipColor");
   }
 
   equipHead(_item: number): void {
-    throw new Error("Not implemented: equipHead");
+    throw this.unsupportedOperation("equipHead");
   }
 
   equipFace(_item: number): void {
-    throw new Error("Not implemented: equipFace");
+    throw this.unsupportedOperation("equipFace");
   }
 
   equipNeck(_item: number): void {
-    throw new Error("Not implemented: equipNeck");
+    throw this.unsupportedOperation("equipNeck");
   }
 
   equipBody(_item: number): void {
-    throw new Error("Not implemented: equipBody");
+    throw this.unsupportedOperation("equipBody");
   }
 
   equipHand(_item: number): void {
-    throw new Error("Not implemented: equipHand");
+    throw this.unsupportedOperation("equipHand");
   }
 
   equipFeet(_item: number): void {
-    throw new Error("Not implemented: equipFeet");
+    throw this.unsupportedOperation("equipFeet");
   }
 
   equipFlag(_item: number): void {
-    throw new Error("Not implemented: equipFlag");
+    throw this.unsupportedOperation("equipFlag");
   }
 
   equipPhoto(_item: number): void {
-    throw new Error("Not implemented: equipPhoto");
+    throw this.unsupportedOperation("equipPhoto");
   }
 
   buddyRequest(_id: number): void {
-    throw new Error("Not implemented: buddyRequest");
+    throw this.unsupportedOperation("buddyRequest");
   }
 
   buddyAccept(_id: number): void {
-    throw new Error("Not implemented: buddyAccept");
+    throw this.unsupportedOperation("buddyAccept");
   }
 
   buddyReject(_id: number): void {
-    throw new Error("Not implemented: buddyReject");
+    throw this.unsupportedOperation("buddyReject");
   }
 
   buddyRequestSeen(_id: number): void {
-    throw new Error("Not implemented: buddyRequestSeen");
+    throw this.unsupportedOperation("buddyRequestSeen");
   }
 
   getBuddy(_id: number, _type: "buddies" | "buddyRequests"): void {
-    throw new Error("Not implemented: getBuddy");
+    throw this.unsupportedOperation("getBuddy");
+  }
+
+  findBuddy(_id: number): void {
+    throw this.unsupportedOperation("findBuddy");
   }
 
   removeBuddy(_id: number): void {
-    throw new Error("Not implemented: removeBuddy");
+    throw this.unsupportedOperation("removeBuddy");
   }
 
   addIgnore(_id: number): void {
-    throw new Error("Not implemented: addIgnore");
+    throw this.unsupportedOperation("addIgnore");
   }
 
   removeIgnore(_id: number): void {
-    throw new Error("Not implemented: removeIgnore");
+    throw this.unsupportedOperation("removeIgnore");
   }
 
   getPlayer(_id: number): void {
-    throw new Error("Not implemented: getPlayer");
+    throw this.unsupportedOperation("getPlayer");
   }
 
   getAllSlots(): void {
-    throw new Error("Not implemented: getAllSlots");
+    throw this.unsupportedOperation("getAllSlots");
   }
 
   getMascots(): void {
-    throw new Error("Not implemented: getMascots");
+    throw this.unsupportedOperation("getMascots");
   }
 
   sendPostcard(_userId: number, _cardId: string): void {
-    throw new Error("Not implemented: sendPostcard");
+    throw this.unsupportedOperation("sendPostcard");
   }
 
   getStamps(_userId: number): void {
-    throw new Error("Not implemented: getStamps");
+    throw this.unsupportedOperation("getStamps");
   }
 
   getPostcards(): void {
-    throw new Error("Not implemented: getPostcards");
+    throw this.unsupportedOperation("getPostcards");
   }
 
   getIglooOpen(_igloo: number): void {
-    throw new Error("Not implemented: getIglooOpen");
+    throw this.unsupportedOperation("getIglooOpen");
   }
 
   getIgloos(): void {
-    throw new Error("Not implemented: getIgloos");
+    throw this.unsupportedOperation("getIgloos");
   }
 
-  getPuffles(_userId: number): void {
-    throw new Error("Not implemented: getPuffles");
+  getPuffles(_userId: number, _isBackyard?: boolean): void {
+    throw this.unsupportedOperation("getPuffles");
+  }
+
+  getAllPuffles(): void {
+    throw this.unsupportedOperation("getAllPuffles");
+  }
+
+  getPuffleWellbeing(_puffle: number): void {
+    throw this.unsupportedOperation("getPuffleWellbeing");
+  }
+
+  playPuffle(_puffle: number): void {
+    throw this.unsupportedOperation("playPuffle");
+  }
+
+  restPuffle(_puffle: number): void {
+    throw this.unsupportedOperation("restPuffle");
+  }
+
+  buyPuffleItem(_puffleId: number, _item: number): void {
+    throw this.unsupportedOperation("buyPuffleItem");
+  }
+
+  walkPuffle(_puffle: number): void {
+    throw this.unsupportedOperation("walkPuffle");
+  }
+
+  initializePuffleTower(): void {
+    throw this.unsupportedOperation("initializePuffleTower");
+  }
+
+  getBackyardSupplies(): void {
+    throw this.unsupportedOperation("getBackyardSupplies");
   }
 
   adoptPuffle(_type: number, _name: string): void {
-    throw new Error("Not implemented: adoptPuffle");
+    throw this.unsupportedOperation("adoptPuffle");
   }
 
   getIglooLikes(): void {
-    throw new Error("Not implemented: getIglooLikes");
+    throw this.unsupportedOperation("getIglooLikes");
   }
 
   checkPuffleSprite(_puffleSprite: boolean): void {
-    throw new Error("Not implemented: checkPuffleSprite");
+    throw this.unsupportedOperation("checkPuffleSprite");
   }
 
   joinIgloo(_igloo: number, _x?: number, _y?: number): void {
-    throw new Error("Not implemented: joinIgloo");
+    throw this.unsupportedOperation("joinIgloo");
+  }
+
+  getStoreMusic(): void {
+    throw this.unsupportedOperation("getStoreMusic");
+  }
+
+  buyMusic(_music: string): void {
+    throw this.unsupportedOperation("buyMusic");
+  }
+
+  getIglooStoreItems(): void {
+    throw this.unsupportedOperation("getIglooStoreItems");
+  }
+
+  buyFurniture(_furniture: string, _amount: number): void {
+    throw this.unsupportedOperation("buyFurniture");
+  }
+
+  updateIglooMusic(_music: string): void {
+    throw this.unsupportedOperation("updateIglooMusic");
+  }
+
+  updateIglooFurniture(
+    _furniture: Array<{
+      furnitureId: number;
+      x: number;
+      y: number;
+      rotation: number;
+      frame: number;
+      depth: number;
+      slot?: number;
+    }>,
+  ): void {
+    throw this.unsupportedOperation("updateIglooFurniture");
+  }
+
+  autoUpdateIglooFurniture(
+    _furniture: Array<{
+      furnitureId: number;
+      x: number;
+      y: number;
+      rotation: number;
+      frame: number;
+      depth: number;
+      slot?: number;
+    }>,
+  ): void {
+    throw this.unsupportedOperation("autoUpdateIglooFurniture");
+  }
+
+  updateIglooType(_type: number): void {
+    throw this.unsupportedOperation("updateIglooType");
+  }
+
+  openIgloo(): void {
+    throw this.unsupportedOperation("openIgloo");
+  }
+
+  closeIglooBounds(): void {
+    throw this.unsupportedOperation("closeIglooBounds");
+  }
+
+  likeIgloo(): void {
+    throw this.unsupportedOperation("likeIgloo");
+  }
+
+  openIglooEditor(): void {
+    throw this.unsupportedOperation("openIglooEditor");
+  }
+
+  closeIglooEditor(): void {
+    throw this.unsupportedOperation("closeIglooEditor");
   }
 
   gameOver(_coins: number): void {
-    throw new Error("Not implemented: gameOver");
+    throw this.unsupportedOperation("gameOver");
   }
 
   collectStamp(_stamp: number): void {
-    throw new Error("Not implemented: collectStamp");
+    throw this.unsupportedOperation("collectStamp");
   }
 
   /** Fetch ninja rank, progress, and card deck. Listen for `get_ninja` event. */
   getNinja(): void {
-    throw new Error("Not implemented: getNinja");
+    throw this.unsupportedOperation("getNinja");
   }
 
   /** Fetch state of all Dojo mats. Listen for `get_waddles` event. */
   getMats(): void {
-    throw new Error("Not implemented: getMats");
+    throw this.unsupportedOperation("getMats");
   }
 
   /** Join Sensei matchmaking queue. Listen for `tick_matchmaking` events. */
   joinMatchmaking(): void {
-    throw new Error("Not implemented: joinMatchmaking");
+    throw this.unsupportedOperation("joinMatchmaking");
   }
 
   /** Leave Sensei matchmaking queue. */
   leaveMatchmaking(): void {
-    throw new Error("Not implemented: leaveMatchmaking");
+    throw this.unsupportedOperation("leaveMatchmaking");
   }
 
   /** Start a Card-Jitsu match after entering a game room. Listen for `start_game` event. */
   startGame(): void {
-    throw new Error("Not implemented: startGame");
+    throw this.unsupportedOperation("startGame");
   }
 
   /** Play a card from your hand by slot index. Listen for `move_my_card` event. */
   selectCard(_slot: number): void {
-    throw new Error("Not implemented: selectCard");
+    throw this.unsupportedOperation("selectCard");
   }
 
   /** Preload a power card animation asset. */
   loadAnimation(_animation: string): void {
-    throw new Error("Not implemented: loadAnimation");
+    throw this.unsupportedOperation("loadAnimation");
   }
 
   /** Sit on a Dojo mat to wait for an opponent. Listen for `update_waddle` events. */
   joinMat(_waddle: number): void {
-    throw new Error("Not implemented: joinMat");
+    throw this.unsupportedOperation("joinMat");
   }
 }

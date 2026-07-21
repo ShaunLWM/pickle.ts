@@ -1,6 +1,8 @@
 export type ServerInfo = {
   name: string;
   population: number;
+  /** CPPS.lol only: exact number of penguins online. */
+  users?: number;
 };
 
 export type LoginOptions = {

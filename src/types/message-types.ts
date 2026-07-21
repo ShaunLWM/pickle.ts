@@ -22,8 +22,8 @@ export type ClientMessages = {
   send_frame: { frame: number; set?: boolean };
   send_message: { message: string };
   join_room: { room: number; x?: number; y?: number };
-  add_item: { item: number };
-  send_emote: { emote: number };
+  add_item: { item: number | string };
+  send_emote: { emote: number; pack?: number };
   send_safe: { safe: number };
   snowball: { x: number; y: number };
   buddy_request: { id: number };
@@ -41,7 +41,7 @@ export type ClientMessages = {
   get_igloo_open: { igloo: number };
   get_igloos: Record<string, never>;
   get_puffles: { userId: number; isBackyard?: boolean };
-  get_igloo_likes: Record<string, never>;
+  get_igloo_likes: { iglooId?: number };
   join_igloo: { igloo: number; x?: number; y?: number };
   update_color: { item: number };
   update_head: { item: number };
@@ -78,7 +78,7 @@ export type ClientMessages = {
   update_igloo: { type: number };
   open_igloo: Record<string, never>;
   close_igloo_bounds: Record<string, never>;
-  like_igloo: Record<string, never>;
+  like_igloo: { iglooId?: number };
   igloo_editor_open: Record<string, never>;
   igloo_editor_closed: Record<string, never>;
   tower_init: Record<string, never>;
@@ -99,6 +99,15 @@ export type ClientMessages = {
   load_animation: { animation: string };
   /** Sit on a Dojo mat to wait for an opponent (wire: join_waddle) */
   join_waddle: { waddle: number };
+  /** CPPS.lol-only packets. */
+  leave_waddle: Record<string, never>;
+  remove_inventory: { item: number };
+  get_snowflake_state: Record<string, never>;
+  accept_mature: Record<string, never>;
+  get_pets: { userId: number };
+  get_igloo_contest: Record<string, never>;
+  send_mail: { recipient: number; postcardId: number };
+  marry_request: { id: number };
 };
 
 export type ServerMessages = {
@@ -144,6 +153,7 @@ export type ServerMessages = {
   send_emote: {
     id: number;
     emote: number;
+    pack?: number;
   };
   join_game_room: {
     game: number;
@@ -235,8 +245,10 @@ export type ServerMessages = {
     id: number;
   };
   add_item: {
-    item: number;
+    item: number | string;
     coins: number;
+    name?: string;
+    slot?: string;
   };
   get_postcards: {
     postcards: Postcard[];
@@ -375,7 +387,50 @@ export type ServerMessages = {
   play_animation: { animation: string; winner: number };
   /** Game finished — winner seat, winning card UUIDs, and result message */
   game_won: { winner: number; uuid: string[]; message: string };
+  /** CPPS.lol-only events. */
+  remove_inventory: { id: number | string };
+  snowflake_state: {
+    windowOpen: boolean;
+    lifetimeMs: number;
+    type: string | number | null;
+  };
+  get_pets: {
+    userId?: number;
+    pets: Puffle[];
+  };
+  igloo_contest: { active: boolean };
+  igloo_likes: {
+    iglooId: number;
+    likes: number;
+    liked: boolean;
+    created?: boolean | string;
+  };
+  marry_request: { id: number };
 };
+
+/** CPPS.lol-only commands captured from its signed Socket.IO protocol. */
+export type CppslolClientMessages = Pick<
+  ClientMessages,
+  | "leave_waddle"
+  | "remove_inventory"
+  | "get_snowflake_state"
+  | "accept_mature"
+  | "get_pets"
+  | "get_igloo_contest"
+  | "send_mail"
+  | "marry_request"
+>;
+
+/** CPPS.lol-only events captured from its signed Socket.IO protocol. */
+export type CppslolServerMessages = Pick<
+  ServerMessages,
+  | "remove_inventory"
+  | "snowflake_state"
+  | "get_pets"
+  | "igloo_contest"
+  | "igloo_likes"
+  | "marry_request"
+>;
 
 /** CPJourney-only commands captured from its Socket.IO protocol. */
 export type CpjourneyClientMessages = Pick<

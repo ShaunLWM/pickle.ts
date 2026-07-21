@@ -8,6 +8,7 @@ import { type AdapterName, createAdapter } from "./adapters/index.js";
 import type { ConnectionProfileInput } from "./connection-profile.js";
 import { ClientOperationError } from "./errors.js";
 import { CardJitsu } from "./games/card-jitsu.js";
+import { Cppslol } from "./games/cpps-lol.js";
 import {
   type ClientDisconnectInfo,
   type ClientOperationOptions,
@@ -112,6 +113,12 @@ const KNOWN_ACTIONS = new Set<string>([
   "queue_server_join",
   "disconnect",
   "unknown_packet",
+  "remove_inventory",
+  "snowflake_state",
+  "get_pets",
+  "igloo_contest",
+  "igloo_likes",
+  "marry_request",
 ]);
 
 type ServerMessageHandler<K extends keyof ServerMessages> = (
@@ -139,6 +146,7 @@ export class Client extends EventEmitter {
   private loginResult: LoginResult | null = null;
   private log: LogFn | null = null;
   private _cardJitsu: CardJitsu | null = null;
+  private _cppslol: Cppslol | null = null;
   private intentionalDisconnect = false;
   private disconnectNotified = false;
   private connectionFailure: ClientOperationError | null = null;
@@ -159,6 +167,12 @@ export class Client extends EventEmitter {
     if (!this._cardJitsu)
       this._cardJitsu = new CardJitsu(this.adapter, this.request.bind(this));
     return this._cardJitsu;
+  }
+
+  get cppslol(): Cppslol {
+    if (!this._cppslol)
+      this._cppslol = new Cppslol(this.adapter, this.request.bind(this));
+    return this._cppslol;
   }
 
   constructor(server: AdapterName, options?: ClientOptions) {
@@ -652,7 +666,7 @@ export class Client extends EventEmitter {
       "add_item",
       () => this.adapter.addItem(item),
       options,
-      (response) => response.item === item,
+      (response) => Number(response.item) === item,
     );
   }
   equipColor(item: number): void {
@@ -1202,10 +1216,18 @@ export class Client extends EventEmitter {
       case "update_player": {
         const id = args.id as number;
         const slot = args.slot as string;
-        const item = args.item as number;
-        const user = this.users.get(id);
-        if (user && slot in user) {
-          (user as Record<string, unknown>)[slot] = item;
+        const item = Number(args.item);
+        const updateSlot = (user: RoomUser): void => {
+          if (slot in user) {
+            (user as Record<string, unknown>)[slot] = item;
+          } else if (slot in user.meta || this.adapter.id === "CPPS.lol") {
+            user.meta[slot] = item;
+          }
+        };
+        const roomUser = this.users.get(id);
+        if (roomUser) updateSlot(roomUser);
+        if (this.player?.id === id && this.player !== roomUser) {
+          updateSlot(this.player);
         }
         break;
       }
@@ -1236,7 +1258,34 @@ export class Client extends EventEmitter {
         }
         break;
       }
-      case "add_item":
+      case "remove_inventory": {
+        if (this.adapter.id !== "CPPS.lol" || !this.player) break;
+        const item = Number(args.id);
+        if (Number.isFinite(item)) {
+          this.player.inventory = this.player.inventory.filter(
+            (inventoryItem) => inventoryItem !== item,
+          );
+        }
+        break;
+      }
+      case "add_item": {
+        if (this.adapter.id !== "CPJourney" && this.adapter.id !== "CPPS.lol") {
+          break;
+        }
+        const coins = args.coins;
+        if (this.player && typeof coins === "number") {
+          this.player.coins = coins;
+        }
+        const item = Number(args.item);
+        if (
+          this.player &&
+          Number.isFinite(item) &&
+          !this.player.inventory.includes(item)
+        ) {
+          this.player.inventory.push(item);
+        }
+        break;
+      }
       case "add_furniture":
       case "add_music":
       case "adopt_puffle":
@@ -1248,14 +1297,6 @@ export class Client extends EventEmitter {
         const coins = args.coins;
         if (this.player && typeof coins === "number") {
           this.player.coins = coins;
-        }
-        if (
-          action === "add_item" &&
-          this.player &&
-          typeof args.item === "number" &&
-          !this.player.inventory.includes(args.item)
-        ) {
-          this.player.inventory.push(args.item);
         }
         break;
       }

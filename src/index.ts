@@ -13,6 +13,7 @@ export {
   sanitizeClientErrorMessage,
 } from "./errors.js";
 export { CardJitsu } from "./games/card-jitsu.js";
+export { Cppslol } from "./games/cpps-lol.js";
 export {
   type ClientConnectionTimeouts,
   type ClientDisconnectInfo,
@@ -32,6 +33,8 @@ export type {
   ClientMessages,
   CpjourneyClientMessages,
   CpjourneyServerMessages,
+  CppslolClientMessages,
+  CppslolServerMessages,
   ServerMessages,
 } from "./types/message-types.js";
 export type {

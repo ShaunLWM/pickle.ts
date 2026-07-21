@@ -2,7 +2,7 @@
 
 Type-safe client library for Club Penguin Private Servers.
 
-Built with TypeScript, Socket.IO, and msgpack. Supports CPJourney, CPLegacy, NewCP, and PenguinOrigins through an adapter pattern.
+Built with TypeScript, Socket.IO, and msgpack. Supports CPJourney, CPLegacy, CPPS.lol, NewCP, and PenguinOrigins through an adapter pattern.
 
 ## Install
 
@@ -44,7 +44,7 @@ Creates a new client instance.
 
 | Param | Type | Description |
 |---|---|---|
-| `server` | `"CPJourney" \| "CPLegacy" \| "NewCP" \| "PenguinOrigins"` | CPPS server identifier (strongly typed) |
+| `server` | `"CPJourney" \| "CPLegacy" \| "CPPSlol" \| "NewCP" \| "PenguinOrigins"` | CPPS server identifier (strongly typed) |
 | `options.debug` | `boolean \| LogFn` | Enable debug logging. Pass `true` for console.log, or a custom function |
 | `options.connectionProfile` | `"chrome" \| "node" \| ConnectionProfile` | Controls HTTP/WebSocket headers. Defaults to browser-like Chrome headers; use `"node"` to preserve Node defaults |
 
@@ -84,7 +84,8 @@ const servers = await client.login({
   timeoutMs: 20_000,
   signal: abortController.signal,
 })
-// servers: ServerInfo[] = [{ name: string, population: number }]
+// servers: ServerInfo[] = [{ name: string, population: number, users?: number }]
+// CPPS.lol: population is browser bars; users is the exact penguin count.
 ```
 
 Also supports token-based login:
@@ -223,12 +224,14 @@ client.disconnect()
 
 All events are fully typed via `ServerMessages`.
 
-`ServerMessages` remains the compatibility aggregate. CPJourney-specific wire
-contracts are also exported separately as `CpjourneyClientMessages` and
-`CpjourneyServerMessages`; unsupported methods throw or reject with a
-non-retryable `ClientOperationError` whose category is
-`unsupported_operation`. Shared actions should be normalized by each adapter
-rather than assuming identical wire payloads.
+`ServerMessages` remains the compatibility aggregate. Server-specific wire
+contracts are also exported separately as `CpjourneyClientMessages`,
+`CpjourneyServerMessages`, `CppslolClientMessages`, and
+`CppslolServerMessages`. CPPS.lol-only operations are available through
+`client.cppslol`; unsupported methods throw or reject with a non-retryable
+`ClientOperationError` whose category is `unsupported_operation`. Shared
+actions should be normalized by each adapter rather than assuming identical
+wire payloads.
 
 ```typescript
 client.on("send_message", ({ id, message }) => {
@@ -303,7 +306,7 @@ import type {
   PlayerSettings,   // game settings
   Buddy,            // buddy list entry
   Mascot,           // mascot data
-  ServerInfo,       // server name + population
+  ServerInfo,       // server name + population; CPPS.lol also includes users
   LoginOptions,     // username + password login
   TokenLoginOptions,// username + token login
   LoginResult,      // login response (servers, key, username)

@@ -182,7 +182,7 @@ describe("Client.connect", () => {
     expect(disconnects[1]).toMatchObject({ intentional: true });
   });
 
-  it("synchronizes captured coin, igloo-open, and walking-puffle state", async () => {
+  it("synchronizes captured player state before emitting updates", async () => {
     const client = new Client("CPJourney");
     const adapter = new ImmediateAdapter();
     installAdapter(client, adapter);
@@ -202,6 +202,10 @@ describe("Client.connect", () => {
       args: { user: { id: 8, username: "Puffle Walker" } },
     });
     adapter.connectOptions?.onMessage?.({
+      action: "add_player",
+      args: { user: { id: 7, username: "Test Bot" } },
+    });
+    adapter.connectOptions?.onMessage?.({
       action: "walk_puffle",
       args: { user: 8, puffle: 11, type: 0 },
     });
@@ -212,6 +216,30 @@ describe("Client.connect", () => {
       walking: 11,
       meta: { walkingPuffleType: 0 },
     });
+
+    client.on("transform_player", ({ id, transform }) => {
+      expect(client.users.get(id)?.meta.transform).toBe(transform);
+    });
+    client.on("igloo_bounds_status", ({ status }) => {
+      expect(client.player?.meta.iglooBounds).toBe(status);
+      expect(client.users.get(7)?.meta.iglooBounds).toBe(status);
+    });
+    adapter.connectOptions?.onMessage?.({
+      action: "transform_player",
+      args: { id: 8, transform: 35 },
+    });
+    adapter.connectOptions?.onMessage?.({
+      action: "transform_player",
+      args: { id: 7, transform: 12 },
+    });
+    adapter.connectOptions?.onMessage?.({
+      action: "igloo_bounds_status",
+      args: { status: 1 },
+    });
+
+    expect(client.users.get(8)?.meta.transform).toBe(35);
+    expect(client.users.get(7)?.meta.transform).toBe(12);
+    expect(client.player?.meta.transform).toBe(12);
 
     adapter.connectOptions?.onMessage?.({
       action: "stop_walking",

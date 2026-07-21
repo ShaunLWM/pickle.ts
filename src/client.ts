@@ -1258,6 +1258,25 @@ export class Client extends EventEmitter {
         }
         break;
       }
+      case "igloo_bounds_status": {
+        const status = args.status as number;
+        if (this.player) {
+          this.player.meta.iglooBounds = status;
+          const roomUser = this.users.get(this.player.id);
+          if (roomUser) roomUser.meta.iglooBounds = status;
+        }
+        break;
+      }
+      case "transform_player": {
+        const id = args.id as number;
+        const transform = args.transform as number;
+        const roomUser = this.users.get(id);
+        if (roomUser) roomUser.meta.transform = transform;
+        if (this.player?.id === id && this.player !== roomUser) {
+          this.player.meta.transform = transform;
+        }
+        break;
+      }
       case "remove_inventory": {
         if (this.adapter.id !== "CPPS.lol" || !this.player) break;
         const item = Number(args.id);

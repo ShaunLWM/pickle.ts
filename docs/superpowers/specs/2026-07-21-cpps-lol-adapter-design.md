@@ -8,9 +8,8 @@ and exact user counts, game connection, the existing shared `Client` actions,
 and the CPPS.lol-only packets observed during the authenticated browser
 capture.
 
-The example must read `CPPSLOL_USERNAME` and `CPPSLOL_PASSWORD` from the
-environment. Credentials, tokens, packet keys, and captured account data must
-never be committed.
+Credentials, tokens, packet keys, and captured account data must never be
+committed.
 
 ## Architecture
 
@@ -94,21 +93,6 @@ slots such as `headLayer`. CPPS.lol `add_item` and `remove_inventory` responses
 will also update the normalized player inventory, and captured total-coin
 values from `add_item` will update the normalized coin balance.
 
-## Example
-
-Add a dependency-free `examples/cpps-lol-basic.mjs` example and an npm command
-that builds the package before running it. The example will:
-
-1. read the CPPS.lol username and password from environment variables;
-2. log in and print each server's browser bars and exact user count;
-3. connect to the selected or first server;
-4. print the loaded player and room;
-5. perform harmless movement, emote, and CPPS.lol-specific actions; and
-6. disconnect cleanly.
-
-The example must not spend currency, delete inventory, send mail, or create a
-relationship request by default.
-
 ## Verification
 
 Keep tests focused: one deterministic signer test, login/connect lifecycle and
@@ -128,6 +112,5 @@ to guard the other adapters.
   from `BaseAdapter`.
 - Layered appearance and inventory mutations keep normalized client state in
   sync.
-- The dependency-free example is runnable through its npm command, contains no
-  embedded credentials, and avoids destructive or spending actions by default.
+- No credentials or captured session secrets are committed.
 - Existing adapters continue to typecheck and pass their tests.

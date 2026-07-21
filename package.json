@@ -1,6 +1,6 @@
 {
   "name": "@shaunlwm/pickle.ts",
-  "version": "1.12.0",
+  "version": "1.12.1",
   "description": "Club Penguin Private Server client library",
   "type": "module",
   "main": "./dist/index.js",

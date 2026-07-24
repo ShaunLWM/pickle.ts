@@ -49,6 +49,7 @@ export type ConnectOptions = {
 
 export abstract class BaseAdapter {
   abstract readonly id: string;
+  readonly rejectRequestsOnServerError: boolean = false;
   protected socket: Socket | null = null;
   loginMessage: string | null = null;
   loginStatus: "active" | "banned" = "active";

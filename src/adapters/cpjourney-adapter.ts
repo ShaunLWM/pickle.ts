@@ -44,6 +44,7 @@ type ServerMessage = {
 
 export class CpjourneyAdapter extends BaseAdapter {
   readonly id = "CPJourney";
+  override readonly rejectRequestsOnServerError = true;
   private gameToken: string | undefined;
 
   async login(

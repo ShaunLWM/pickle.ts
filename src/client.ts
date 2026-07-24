@@ -444,6 +444,7 @@ export class Client extends EventEmitter {
     optionsOrTimeout?: number | ClientOperationOptions,
     send?: () => void,
     matches?: ServerMessageMatcher<K>,
+    rejectOnServerError?: boolean,
   ): Promise<ServerMessages[K]> {
     const options =
       typeof optionsOrTimeout === "number"
@@ -460,6 +461,11 @@ export class Client extends EventEmitter {
         if (timer !== undefined) clearTimeout(timer);
         this.off(event, handler as unknown as (...args: unknown[]) => void);
         this.off("disconnect", onDisconnect);
+        if (rejectOnServerError)
+          this.off(
+            "server_error",
+            onServerError as unknown as (...args: unknown[]) => void,
+          );
         options?.signal?.removeEventListener("abort", onAbort);
       };
 
@@ -500,6 +506,19 @@ export class Client extends EventEmitter {
         );
       };
 
+      const onServerError = ({
+        error,
+      }: ServerMessages["server_error"]): void => {
+        rejectWith(
+          new ClientOperationError({
+            category: "server_error",
+            phase: "ready",
+            retryable: false,
+            message: `Server error while waiting for ${String(event)}: ${String(error)}`,
+          }),
+        );
+      };
+
       if (options?.signal?.aborted) {
         onAbort();
         return;
@@ -520,6 +539,11 @@ export class Client extends EventEmitter {
 
       this.on(event, handler);
       this.once("disconnect", onDisconnect);
+      if (rejectOnServerError)
+        this.once(
+          "server_error",
+          onServerError as unknown as (...args: unknown[]) => void,
+        );
       options?.signal?.addEventListener("abort", onAbort, { once: true });
 
       if (send) {
@@ -559,14 +583,24 @@ export class Client extends EventEmitter {
     const tail = previous ? previous.then(() => turn) : turn;
     this.requestTails.set(event, tail);
 
+    const rejectOnServerError =
+      this.adapter.rejectRequestsOnServerError;
     const operation = previous
       ? this.waitForRequestTurn(
           event,
           previous,
           disconnectEpoch,
           options?.signal,
-        ).then(() => this.waitForEvent(event, options, send, matches))
-      : this.waitForEvent(event, options, send, matches);
+        ).then(() =>
+          this.waitForEvent(
+            event,
+            options,
+            send,
+            matches,
+            rejectOnServerError,
+          ),
+        )
+      : this.waitForEvent(event, options, send, matches, rejectOnServerError);
 
     return operation.finally(() => {
       releaseTurn();

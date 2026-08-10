@@ -28,14 +28,19 @@ type WorldConfig = {
 
 type CrumbsWorlds = Record<string, WorldConfig>;
 
+type LoginResponseWorld = {
+  id: string;
+  name: string;
+  population: number;
+  buddies: boolean;
+};
+
 type LoginResponse = {
   success: boolean;
   message?: string;
   username: string;
   key: string;
-  populations: Record<string, number>;
-  moderator: boolean;
-  buddyWorlds: string[];
+  worlds: LoginResponseWorld[];
 };
 
 type GameAuthResponse = {
@@ -343,15 +348,19 @@ export class NewcpAdapter extends BaseAdapter {
               return;
             }
 
-            const servers: ServerInfo[] = Object.entries(
-              response.populations ?? {},
-            ).map(([name, population]) => ({ name, population }));
+            const servers: ServerInfo[] = (response.worlds ?? []).map((w) => ({
+              name: w.name,
+              population: w.population,
+            }));
+            const buddyWorlds = (response.worlds ?? [])
+              .filter((w) => w.buddies)
+              .map((w) => w.name);
             succeed({
               servers,
               key: response.key,
               username: response.username,
-              moderator: response.moderator ?? false,
-              buddyWorlds: response.buddyWorlds ?? [],
+              moderator: false,
+              buddyWorlds,
             });
           } catch (cause) {
             fail(

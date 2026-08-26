@@ -295,7 +295,7 @@ export class CpjourneyAdapter extends BaseAdapter {
           createToken: false,
           joinInvis: false,
           takeoverMascot: false,
-          token: this.gameToken ?? "",
+          ...(this.gameToken ? { token: this.gameToken } : {}),
         };
 
         gameSocket.emit("message", {
@@ -787,6 +787,10 @@ export class CpjourneyAdapter extends BaseAdapter {
 
   override checkPuffleSprite(puffleSprite: boolean): void {
     this.send("check_puffle_sprite", { puffleSprite });
+  }
+
+  override openSprite(sprite: string): void {
+    this.send("open_sprite", { sprite });
   }
 
   override joinIgloo(igloo: number, x?: number, y?: number): void {

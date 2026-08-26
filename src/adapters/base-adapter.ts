@@ -353,6 +353,10 @@ export abstract class BaseAdapter {
     throw this.unsupportedOperation("checkPuffleSprite");
   }
 
+  openSprite(_sprite: string): void {
+    throw this.unsupportedOperation("openSprite");
+  }
+
   joinIgloo(_igloo: number, _x?: number, _y?: number): void {
     throw this.unsupportedOperation("joinIgloo");
   }

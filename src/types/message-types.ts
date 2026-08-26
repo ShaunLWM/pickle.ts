@@ -60,6 +60,7 @@ export type ClientMessages = {
   join_server: Record<string, never>;
   adopt_puffle: { type: number; name: string };
   check_puffle_sprite: { puffleSprite: unknown };
+  open_sprite: { sprite: string };
   get_all_puffles: Record<string, never>;
   get_wellbeing: { puffle: number };
   puffle_play: { puffle: number };
@@ -459,6 +460,7 @@ export type CpjourneyClientMessages = Pick<
   | "like_igloo"
   | "igloo_editor_open"
   | "igloo_editor_closed"
+  | "open_sprite"
   | "tower_init"
 >;
 

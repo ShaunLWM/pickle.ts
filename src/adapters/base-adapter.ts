@@ -357,6 +357,10 @@ export abstract class BaseAdapter {
     throw this.unsupportedOperation("openSprite");
   }
 
+  equipToy(_toy: number): void {
+    throw this.unsupportedOperation("equipToy");
+  }
+
   joinIgloo(_igloo: number, _x?: number, _y?: number): void {
     throw this.unsupportedOperation("joinIgloo");
   }

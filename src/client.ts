@@ -104,6 +104,7 @@ const KNOWN_ACTIONS = new Set<string>([
   "wait_queue_update",
   "slot",
   "snowball",
+  "equip_toy",
   "send_safe",
   "stop_walking",
   "update_table",

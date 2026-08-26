@@ -61,6 +61,7 @@ export type ClientMessages = {
   adopt_puffle: { type: number; name: string };
   check_puffle_sprite: { puffleSprite: unknown };
   open_sprite: { sprite: string };
+  equip_toy: { toy: number };
   get_all_puffles: Record<string, never>;
   get_wellbeing: { puffle: number };
   puffle_play: { puffle: number };

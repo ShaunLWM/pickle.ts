@@ -35,12 +35,14 @@ type ServerMessage = {
 
 export class PenguinoriginsAdapter extends BaseAdapter {
   readonly id = "PenguinOrigins";
+  private gameToken: string | undefined;
 
   async login(
     options: LoginOptions | TokenLoginOptions,
     operationOptions?: ClientOperationOptions,
   ): Promise<LoginResult> {
     this.resetLoginState();
+    this.gameToken = "token" in options ? options.token : undefined;
     const loginSocket = this.createSocket("/world/login/");
 
     const result = await new Promise<LoginResult>((resolve, reject) => {
@@ -271,7 +273,7 @@ export class PenguinoriginsAdapter extends BaseAdapter {
             username: loginResult.username,
             key: loginResult.key,
             createToken: true,
-            token: "",
+            ...(this.gameToken ? { token: this.gameToken } : {}),
           },
         });
       };
@@ -444,6 +446,10 @@ export class PenguinoriginsAdapter extends BaseAdapter {
 
   override snowball(x: number, y: number): void {
     this.send("snowball", { x, y });
+  }
+
+  override equipToy(toy: number): void {
+    this.send("equip_toy", { toy });
   }
 
   override joinRoom(room: number, x?: number, y?: number): void {

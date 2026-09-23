@@ -103,7 +103,7 @@ export class PenguinoriginsAdapter extends BaseAdapter {
           this.loginMessage = response.message ?? null;
           const message = response.message ?? "Login failed";
           const invalidCredentials =
-            /password|credential|incorrect|invalid login/i.test(message);
+            /password|credential|incorrect|invalid login|not found/i.test(message);
           fail(
             new ClientOperationError({
               category: invalidCredentials

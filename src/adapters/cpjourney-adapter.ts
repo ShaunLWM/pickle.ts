@@ -28,6 +28,7 @@ type LoginResponse = {
   username: string;
   key: string;
   populations: Record<string, number>;
+  afkServers?: string[];
   moderator: boolean;
   buddyWorlds: string[];
 };
@@ -146,6 +147,7 @@ export class CpjourneyAdapter extends BaseAdapter {
           username: response.username,
           moderator: response.moderator,
           buddyWorlds: response.buddyWorlds ?? [],
+          afkServers: response.afkServers,
         });
       };
 
@@ -292,7 +294,7 @@ export class CpjourneyAdapter extends BaseAdapter {
         const authArgs: Record<string, unknown> = {
           username: loginResult.username,
           key: loginResult.key,
-          createToken: false,
+          createToken: true,
           joinInvis: false,
           takeoverMascot: false,
           ...(this.gameToken ? { token: this.gameToken } : {}),

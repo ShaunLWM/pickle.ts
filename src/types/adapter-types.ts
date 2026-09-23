@@ -23,6 +23,8 @@ export type LoginResult = {
   username: string;
   moderator: boolean;
   buddyWorlds: string[];
+  /** CPJourney: worlds where AFK kick is enforced. */
+  afkServers?: string[];
 };
 
 export type QueueUpdate = {

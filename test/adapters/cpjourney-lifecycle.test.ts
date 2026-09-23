@@ -127,10 +127,9 @@ describe("CPJourney connection lifecycle", () => {
           args: {
             username: loginResult.username,
             key: loginResult.key,
-            createToken: false,
+            createToken: true,
             joinInvis: false,
             takeoverMascot: false,
-            token: "",
           },
         },
       ],
@@ -210,7 +209,7 @@ describe("CPJourney connection lifecycle", () => {
           args: {
             username: loginResult.username,
             key: loginResult.key,
-            createToken: false,
+            createToken: true,
             joinInvis: false,
             takeoverMascot: false,
             token: "safe-test-token",

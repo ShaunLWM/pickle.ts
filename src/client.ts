@@ -18,7 +18,6 @@ import type {
   LoginOptions,
   LoginResult,
   QueueUpdate,
-  ServerInfo,
   TokenLoginOptions,
 } from "./types/adapter-types.js";
 import type { ClientMessages, ServerMessages } from "./types/message-types.js";
@@ -191,13 +190,13 @@ export class Client extends EventEmitter {
   async login(
     options: LoginOptions | TokenLoginOptions,
     operationOptions?: ClientOperationOptions,
-  ): Promise<ServerInfo[]> {
+  ): Promise<LoginResult> {
     this.log?.("[login] logging in as", options.username);
     this.loginResult = null;
     const loginResult = await this.adapter.login(options, operationOptions);
     this.loginResult = loginResult;
     this.log?.("[login] success —", loginResult.servers.length, "servers");
-    return loginResult.servers;
+    return loginResult;
   }
 
   async connect(serverName: string, options?: ConnectOptions): Promise<void> {

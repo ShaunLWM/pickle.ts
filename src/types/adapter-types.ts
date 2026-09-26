@@ -9,6 +9,8 @@ export type LoginOptions = {
   username: string;
   password: string;
   secret?: string;
+  /** Filter returned servers by locale (e.g. "en", "es", "fr", "pt"). CPZero only. */
+  language?: string;
 };
 
 export type TokenLoginOptions = {

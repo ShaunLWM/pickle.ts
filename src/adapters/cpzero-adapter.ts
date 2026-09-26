@@ -13,10 +13,6 @@ import type {
   TokenLoginOptions,
 } from "../types/adapter-types.js";
 
-type CpzeroLoginOptions = LoginOptions & {
-  /** Filter returned servers by locale (e.g. "en", "es", "fr", "pt"). */
-  language?: string;
-};
 import type { PlayerData, RoomUser } from "../types/player-types.js";
 import { BaseAdapter, type ConnectOptions } from "./base-adapter.js";
 
@@ -160,7 +156,7 @@ export class CpzeroAdapter extends BaseAdapter {
   private playerId = 0;
 
   async login(
-    options: CpzeroLoginOptions | TokenLoginOptions,
+    options: LoginOptions | TokenLoginOptions,
     operationOptions?: ClientOperationOptions,
   ): Promise<LoginResult> {
     this.resetLoginState();

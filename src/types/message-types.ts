@@ -12,6 +12,7 @@ import type {
   PlayerData,
   Postcard,
   Puffle,
+  PuffleClothing,
   PuffleWellbeing,
   RoomUser,
   RoundResult,
@@ -85,6 +86,8 @@ export type ClientMessages = {
   igloo_editor_closed: Record<string, never>;
   tower_init: Record<string, never>;
   queue_server_join: { server: string };
+  /** Answers afk_warning; the browser sends it when "stay connected" is clicked */
+  afk_heartbeat: Record<string, never>;
   /** Fetch ninja rank, progress, and card deck */
   get_ninja: Record<string, never>;
   /** Fetch state of all Dojo mats (wire: get_waddles) */
@@ -188,6 +191,9 @@ export type ServerMessages = {
   queue_server_join: Record<string, never>;
   wait_queue_update: QueueUpdate;
   cpj_ping: Record<string, never>;
+  /** The server will disconnect an idle player after secondsRemaining */
+  afk_warning: { secondsRemaining?: number };
+  afk_warning_cancelled: Record<string, never>;
   get_mascots: {
     mascots: Mascot[];
   };
@@ -298,7 +304,20 @@ export type ServerMessages = {
     coins: number;
     puffleInventory: Record<string, unknown>;
   };
-  walk_puffle: { user: number; puffle: number; type: number };
+  walk_puffle: {
+    user: number;
+    puffle: number;
+    type: number;
+    haircolor?: number;
+  } & Partial<PuffleClothing>;
+  /** A walked puffle's clothing changed */
+  update_puffle_clothes: {
+    user: number;
+    puffle: number;
+    puffleInventory?: Record<string, unknown>;
+  } & PuffleClothing;
+  /** A walked puffle's tinted-hair color changed (-1 = puffle's own color) */
+  update_puffle_hair_color: { user: number; puffle: number; haircolor: number };
   backyard_supplies: {
     supplyCost: number;
     puffleCount: number;
@@ -339,7 +358,14 @@ export type ServerMessages = {
   /** Server broadcast: a safe-chat phrase was sent */
   send_safe: { id: number; safe: number };
   /** A puffle stopped walking with a player */
-  stop_walking: { user: number; puffle: { type: number; id: number } };
+  stop_walking: {
+    user: number;
+    puffle: {
+      type: number;
+      id: number;
+      haircolor?: number;
+    } & Partial<PuffleClothing>;
+  };
   /** A player sat at or left a minigame table */
   update_table: { table: number; seat: number; username?: string | null };
   /** A player equipped or removed a transformation costume (0 = reverted to normal) */
@@ -463,6 +489,7 @@ export type CpjourneyClientMessages = Pick<
   | "igloo_editor_closed"
   | "open_sprite"
   | "tower_init"
+  | "afk_heartbeat"
 >;
 
 /** CPJourney-only events captured from its Socket.IO protocol. */
@@ -481,6 +508,10 @@ export type CpjourneyServerMessages = Pick<
   | "puffle_popup"
   | "buy_puffle_item"
   | "walk_puffle"
+  | "update_puffle_clothes"
+  | "update_puffle_hair_color"
+  | "afk_warning"
+  | "afk_warning_cancelled"
   | "backyard_supplies"
   | "buddy_find"
   | "receive_postcard"

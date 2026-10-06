@@ -57,6 +57,11 @@ class ImmediateAdapter {
     this.disconnectCalls += 1;
   }
 
+  afkHeartbeats = 0;
+  sendAfkHeartbeat(): void {
+    this.afkHeartbeats += 1;
+  }
+
   normalizeUser(raw: Record<string, unknown>): RoomUser {
     return {
       id: raw.id as number,
@@ -249,6 +254,75 @@ describe("Client.connect", () => {
       walking: 0,
       meta: { walkingPuffleType: undefined },
     });
+  });
+
+  it("tracks walked-puffle clothing and answers AFK warnings", async () => {
+    const client = new Client("CPJourney");
+    const adapter = new ImmediateAdapter();
+    installAdapter(client, adapter);
+    await client.login({ username: "Test Bot", password: "safe" });
+    await client.connect("Blizzard");
+    const send = (action: string, args: Record<string, unknown>): void =>
+      adapter.connectOptions?.onMessage?.({ action, args });
+
+    send("add_player", { user: { id: 8, username: "Puffle Walker" } });
+    send("walk_puffle", {
+      user: 8,
+      puffle: 11,
+      type: 1,
+      costume: 0,
+      back: 0,
+      hair: 161,
+      head: 0,
+      face: 0,
+      haircolor: -1,
+    });
+    expect(client.users.get(8)?.meta).toMatchObject({
+      walkingPuffleType: 1,
+      pufflecostume: 0,
+      puffleback: 0,
+      pufflehair: 161,
+      pufflehead: 0,
+      puffleface: 0,
+      pufflehaircolor: -1,
+    });
+
+    send("update_puffle_clothes", {
+      user: 8,
+      puffle: 11,
+      costume: 0,
+      back: 0,
+      hair: 0,
+      head: 170,
+      face: 0,
+    });
+    send("update_puffle_hair_color", { user: 8, puffle: 11, haircolor: 4 });
+    send("update_puffle_clothes", {
+      user: 8,
+      puffle: 99,
+      costume: 0,
+      back: 0,
+      hair: 0,
+      head: 0,
+      face: 0,
+    });
+    expect(client.users.get(8)?.meta).toMatchObject({
+      pufflehair: 0,
+      pufflehead: 170,
+      pufflehaircolor: 4,
+    });
+
+    send("stop_walking", {
+      user: 8,
+      puffle: { id: 11, type: 1, haircolor: 4, head: 170 },
+    });
+    expect(client.users.get(8)?.meta).toMatchObject({
+      pufflehead: 0,
+      pufflehaircolor: -1,
+    });
+
+    send("afk_warning", { secondsRemaining: 60 });
+    expect(adapter.afkHeartbeats).toBe(1);
   });
 
   it("does not impose CPJourney coin semantics on another adapter", async () => {

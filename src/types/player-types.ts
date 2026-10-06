@@ -140,7 +140,29 @@ export type Puffle = {
   backyard_supplies?: number;
   walking?: boolean;
   backyard?: boolean;
+  /** CPJourney puffle clothing item ids (0 = empty) */
+  costume?: number;
+  back?: number;
+  hair?: number;
+  head?: number;
+  face?: number;
+  /** CPJourney tinted-hair color as a puffle type id (-1 = puffle's own color) */
+  haircolor?: number;
 };
+
+/** CPJourney puffle clothing slots, in render order. */
+export const PUFFLE_CLOTHING_SLOTS = [
+  "costume",
+  "back",
+  "hair",
+  "head",
+  "face",
+] as const;
+
+export type PuffleClothingSlot = (typeof PUFFLE_CLOTHING_SLOTS)[number];
+
+/** CPJourney puffle clothing item ids keyed by slot (0 = empty). */
+export type PuffleClothing = Record<PuffleClothingSlot, number>;
 
 /** CPJourney puffle care values returned by get_wellbeing/update_wellbeing. */
 export type PuffleWellbeing = {

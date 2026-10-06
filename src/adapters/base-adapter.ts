@@ -353,6 +353,10 @@ export abstract class BaseAdapter {
     throw this.unsupportedOperation("checkPuffleSprite");
   }
 
+  sendAfkHeartbeat(): void {
+    throw this.unsupportedOperation("sendAfkHeartbeat");
+  }
+
   openSprite(_sprite: string): void {
     throw this.unsupportedOperation("openSprite");
   }

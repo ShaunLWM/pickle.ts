@@ -166,6 +166,49 @@ describe("CPJourney connection lifecycle", () => {
     });
   });
 
+  it("queues on a fresh socket when the login socket was lost", async () => {
+    const adapter = new TestCpjourneyAdapter();
+    const loginPromise = adapter.login(
+      { username: "Test Bot", password: "safe-test-password" },
+      { timeoutMs: 100 },
+    );
+    const loginSocket = adapter.sockets[0];
+    loginSocket?.serverEmit("connect");
+    loginSocket?.serverEmit("message", {
+      action: "login",
+      args: {
+        success: true,
+        username: loginResult.username,
+        key: loginResult.key,
+        populations: { Blizzard: 6 },
+        moderator: false,
+        buddyWorlds: [],
+      },
+    });
+    const result = await loginPromise;
+    loginSocket?.serverEmit("disconnect", "transport close");
+
+    const connectPromise = adapter.connect("Blizzard", result, {
+      timeouts: { queueMs: 100, authenticationMs: 100 },
+    });
+    const queueSocket = adapter.sockets[1];
+    expect(queueSocket).toBeDefined();
+    queueSocket?.serverEmit("connect");
+    queueSocket?.serverEmit("message", {
+      action: "queue_server_join",
+      args: {},
+    });
+    await flushMicrotasks();
+    adapter.sockets[2]?.serverEmit("connect");
+    adapter.sockets[2]?.serverEmit("message", {
+      action: "game_auth",
+      args: { success: true },
+    });
+
+    await expect(connectPromise).resolves.toBe(adapter.sockets[2]?.asSocket());
+    expect(loginSocket?.listenerCount("disconnect")).toBe(0);
+  });
+
   it("forwards a supplied login token into game authentication", async () => {
     const adapter = new TestCpjourneyAdapter();
     const loginPromise = adapter.login(
@@ -191,15 +234,19 @@ describe("CPJourney connection lifecycle", () => {
     const connectPromise = adapter.connect("Blizzard", tokenLoginResult, {
       timeouts: { queueMs: 100, authenticationMs: 100 },
     });
-    const queueSocket = adapter.sockets[1];
-    queueSocket?.serverEmit("connect");
-    queueSocket?.serverEmit("message", {
+    expect(adapter.sockets).toHaveLength(1);
+    expect(loginSocket?.sent).toContainEqual({
+      event: "message",
+      args: [{ action: "queue_server_join", args: { server: "Blizzard" } }],
+    });
+    loginSocket?.serverEmit("message", {
       action: "queue_server_join",
       args: {},
     });
     await flushMicrotasks();
+    expect(loginSocket?.disconnected).toBe(true);
 
-    const gameSocket = adapter.sockets[2];
+    const gameSocket = adapter.sockets[1];
     gameSocket?.serverEmit("connect");
     expect(gameSocket?.sent).toContainEqual({
       event: "message",

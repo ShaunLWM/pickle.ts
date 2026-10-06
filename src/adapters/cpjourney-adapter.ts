@@ -47,12 +47,16 @@ export class CpjourneyAdapter extends BaseAdapter {
   readonly id = "CPJourney";
   override readonly rejectRequestsOnServerError = true;
   private gameToken: string | undefined;
+  /** The browser queues on the socket that logged in, so keep it open. */
+  private loginSocket: Socket | null = null;
+  private onLoginSocketDisconnect: (() => void) | null = null;
 
   async login(
     options: LoginOptions | TokenLoginOptions,
     operationOptions?: ClientOperationOptions,
   ): Promise<LoginResult> {
     this.resetLoginState();
+    this.releaseLoginSocket();
     this.gameToken = "token" in options ? options.token : undefined;
     const loginSocket = this.createSocket("/world/login/");
 
@@ -91,7 +95,7 @@ export class CpjourneyAdapter extends BaseAdapter {
         if (settled) return;
         settled = true;
         cleanup();
-        loginSocket.disconnect();
+        this.retainLoginSocket(loginSocket);
         resolve(value);
       };
 
@@ -405,7 +409,8 @@ export class CpjourneyAdapter extends BaseAdapter {
     serverName: string,
     options?: ConnectOptions,
   ): Promise<void> {
-    const queueSocket = this.createSocket("/world/login/");
+    const loginSocket = this.takeLoginSocket();
+    const queueSocket = loginSocket ?? this.createSocket("/world/login/");
     const timeouts = this.connectionTimeouts(options);
     this.reportLifecycle(options, "queueing");
 
@@ -523,7 +528,38 @@ export class CpjourneyAdapter extends BaseAdapter {
       queueSocket.on("connect_error", onConnectError);
       options?.signal?.addEventListener("abort", onAbort, { once: true });
       startQueueIdleTimer();
+      if (loginSocket) onConnect();
     });
+  }
+
+  private retainLoginSocket(socket: Socket): void {
+    const onDisconnect = (): void => {
+      if (this.loginSocket !== socket) return;
+      socket.off("disconnect", onDisconnect);
+      this.loginSocket = null;
+      this.onLoginSocketDisconnect = null;
+    };
+    socket.on("disconnect", onDisconnect);
+    this.loginSocket = socket;
+    this.onLoginSocketDisconnect = onDisconnect;
+  }
+
+  /** Hands over the still-connected login socket, or null if it was lost. */
+  private takeLoginSocket(): Socket | null {
+    const socket = this.loginSocket;
+    if (!socket) return null;
+    if (this.onLoginSocketDisconnect) {
+      socket.off("disconnect", this.onLoginSocketDisconnect);
+    }
+    this.loginSocket = null;
+    this.onLoginSocketDisconnect = null;
+    if (socket.connected) return socket;
+    socket.disconnect();
+    return null;
+  }
+
+  private releaseLoginSocket(): void {
+    this.takeLoginSocket()?.disconnect();
   }
 
   send(action: string, args: Record<string, unknown>): void {
@@ -532,6 +568,7 @@ export class CpjourneyAdapter extends BaseAdapter {
   }
 
   disconnect(): void {
+    this.releaseLoginSocket();
     this.socket?.disconnect();
     this.socket = null;
   }
@@ -789,6 +826,10 @@ export class CpjourneyAdapter extends BaseAdapter {
 
   override checkPuffleSprite(puffleSprite: boolean): void {
     this.send("check_puffle_sprite", { puffleSprite });
+  }
+
+  override sendAfkHeartbeat(): void {
+    this.send("afk_heartbeat", {});
   }
 
   override openSprite(sprite: string): void {

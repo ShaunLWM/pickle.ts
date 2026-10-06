@@ -14,6 +14,10 @@ import {
   type ClientOperationOptions,
   DEFAULT_CLIENT_CONNECTION_TIMEOUTS,
 } from "./lifecycle.js";
+import {
+  applyPuffleClothing,
+  applyPuffleHairColor,
+} from "./puffle-clothing.js";
 import type {
   LoginOptions,
   LoginResult,
@@ -89,6 +93,10 @@ const KNOWN_ACTIONS = new Set<string>([
   "puffle_popup",
   "buy_puffle_item",
   "walk_puffle",
+  "update_puffle_clothes",
+  "update_puffle_hair_color",
+  "afk_warning",
+  "afk_warning_cancelled",
   "backyard_supplies",
   "receive_postcard",
   "get_store_music",
@@ -583,8 +591,7 @@ export class Client extends EventEmitter {
     const tail = previous ? previous.then(() => turn) : turn;
     this.requestTails.set(event, tail);
 
-    const rejectOnServerError =
-      this.adapter.rejectRequestsOnServerError;
+    const rejectOnServerError = this.adapter.rejectRequestsOnServerError;
     const operation = previous
       ? this.waitForRequestTurn(
           event,
@@ -592,13 +599,7 @@ export class Client extends EventEmitter {
           disconnectEpoch,
           options?.signal,
         ).then(() =>
-          this.waitForEvent(
-            event,
-            options,
-            send,
-            matches,
-            rejectOnServerError,
-          ),
+          this.waitForEvent(event, options, send, matches, rejectOnServerError),
         )
       : this.waitForEvent(event, options, send, matches, rejectOnServerError);
 
@@ -1156,6 +1157,16 @@ export class Client extends EventEmitter {
     this.emit("disconnect", info);
   }
 
+  /** The room copy and the logged-in player copy of a user, deduplicated. */
+  private trackedUsers(id: number): RoomUser[] {
+    const roomUser = this.users.get(id);
+    const users = roomUser ? [roomUser] : [];
+    if (this.player?.id === id && this.player !== roomUser) {
+      users.push(this.player);
+    }
+    return users;
+  }
+
   private cleanup(): void {
     this.connected = false;
     this.player = null;
@@ -1266,21 +1277,40 @@ export class Client extends EventEmitter {
         break;
       }
       case "walk_puffle": {
-        const id = args.user as number;
-        const user = this.users.get(id);
-        if (user) {
+        for (const user of this.trackedUsers(args.user as number)) {
           user.walking = args.puffle as number;
           user.meta.walkingPuffleType = args.type as number;
+          applyPuffleClothing(user, args);
+          applyPuffleHairColor(user, args.haircolor);
         }
         break;
       }
       case "stop_walking": {
-        const id = args.user as number;
-        const user = this.users.get(id);
-        if (user) {
+        for (const user of this.trackedUsers(args.user as number)) {
           user.walking = 0;
           user.meta.walkingPuffleType = undefined;
+          applyPuffleClothing(user, {});
+          applyPuffleHairColor(user, -1);
         }
+        break;
+      }
+      case "update_puffle_clothes": {
+        for (const user of this.trackedUsers(args.user as number)) {
+          if (user.walking === args.puffle) applyPuffleClothing(user, args);
+        }
+        break;
+      }
+      case "update_puffle_hair_color": {
+        for (const user of this.trackedUsers(args.user as number)) {
+          if (user.walking === args.puffle) {
+            applyPuffleHairColor(user, args.haircolor);
+          }
+        }
+        break;
+      }
+      case "afk_warning": {
+        this.log?.("[afk_warning]", `seconds=${args.secondsRemaining ?? "?"}`);
+        if (this.adapter.id === "CPJourney") this.adapter.sendAfkHeartbeat();
         break;
       }
       case "igloo_open_status": {

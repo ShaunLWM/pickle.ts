@@ -54,8 +54,11 @@ export type {
   PlayerSettings,
   Postcard,
   Puffle,
+  PuffleClothing,
+  PuffleClothingSlot,
   PuffleWellbeing,
   RevealedCard,
   RoomUser,
   RoundResult,
 } from "./types/player-types.js";
+export { PUFFLE_CLOTHING_SLOTS } from "./types/player-types.js";

@@ -57,6 +57,8 @@ class ImmediateAdapter {
     this.disconnectCalls += 1;
   }
 
+  async closeProxy(): Promise<void> {}
+
   afkHeartbeats = 0;
   sendAfkHeartbeat(): void {
     this.afkHeartbeats += 1;

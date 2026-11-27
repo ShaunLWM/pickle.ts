@@ -22,6 +22,7 @@ export {
   type ClientOperationOptions,
   DEFAULT_CLIENT_CONNECTION_TIMEOUTS,
 } from "./lifecycle.js";
+export { ProxyConfigError, proxyLabel } from "./proxy.js";
 export type {
   LoginOptions,
   LoginResult,

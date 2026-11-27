@@ -253,6 +253,7 @@ export class Client extends EventEmitter {
             });
       this.intentionalDisconnect = false;
       this.adapter.disconnect();
+      void this.adapter.closeProxy();
       this.cleanup();
       if (!this.disconnectNotified) {
         this.disconnectNotified = true;
@@ -1118,6 +1119,7 @@ export class Client extends EventEmitter {
     this.intentionalDisconnect = true;
     this.reportLifecycle("disconnecting");
     this.adapter.disconnect();
+    void this.adapter.closeProxy();
     this.handleAdapterDisconnect("client disconnect");
   }
 

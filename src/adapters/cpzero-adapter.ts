@@ -6,6 +6,7 @@ import {
   type ClientOperationOptions,
   DEFAULT_CLIENT_CONNECTION_TIMEOUTS,
 } from "../lifecycle.js";
+import type { ProxyFetch } from "../proxy.js";
 import type {
   LoginOptions,
   LoginResult,
@@ -86,7 +87,10 @@ function parseWorldPopulations(raw: string): { id: number; population: number }[
  * Fetch server ID → name mapping from servers.xml.
  * When `locale` is set, only returns servers under that `<language>` block.
  */
-async function fetchServerNames(locale?: string): Promise<Map<number, string>> {
+async function fetchServerNames(
+  fetch: ProxyFetch,
+  locale?: string,
+): Promise<Map<number, string>> {
   const map = new Map<number, string>();
   try {
     const resp = await fetch(SERVERS_XML_URL);
@@ -352,7 +356,7 @@ export class CpzeroAdapter extends BaseAdapter {
 
     // Resolve world IDs to names via servers.xml, optionally filtered by locale
     const language = "token" in options ? undefined : options.language;
-    const nameMap = await fetchServerNames(language);
+    const nameMap = await fetchServerNames(this.fetch, language);
     const filtered = language
       ? raw.worlds.filter((w) => nameMap.has(w.id))
       : raw.worlds;

@@ -1,3 +1,5 @@
+import { parseProxyUrl } from "./proxy.js";
+
 export type ConnectionProfilePreset = "chrome" | "node";
 
 export type HeaderValue = string | number | boolean | null | undefined;
@@ -11,6 +13,8 @@ export type ConnectionProfile = {
   origin?: string;
   referer?: string;
   headers?: HeaderBag;
+  /** http(s):// or socks5(h):// URL every connection is routed through. */
+  proxy?: string;
 };
 
 export type ConnectionProfileInput =
@@ -24,6 +28,7 @@ export type NormalizedConnectionProfile = {
   origin?: string;
   referer?: string;
   headers: HeaderBag;
+  proxy?: string;
 };
 
 const CHROME_USER_AGENT =
@@ -55,6 +60,7 @@ export function resolveConnectionProfile(
     origin: input.origin,
     referer: input.referer,
     headers: input.headers ?? {},
+    ...(input.proxy ? { proxy: parseProxyUrl(input.proxy) } : {}),
   };
 }
 

@@ -520,7 +520,7 @@ export class CplegacyAdapter extends BaseAdapter {
     body: Record<string, unknown>,
     signal: AbortSignal,
   ): Promise<LoginResponse> {
-    const resp = await fetch(url, {
+    const resp = await this.fetch(url, {
       method: "POST",
       headers: this.connectionHeaders(BROWSER_ORIGIN, {
         "Content-Type": "application/json",

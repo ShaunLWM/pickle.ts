@@ -24,9 +24,12 @@
     "prepublishOnly": "npm run build"
   },
   "dependencies": {
+    "https-proxy-agent": "^9.1.0",
     "socket.io-client": "^4.8.1",
     "socket.io-msgpack-parser": "^3.0.2",
+    "socks-proxy-agent": "^10.1.0",
     "tweetnacl": "^1.0.3",
+    "undici": "^7.30.2",
     "ws": "^8.21.3"
   },
   "devDependencies": {

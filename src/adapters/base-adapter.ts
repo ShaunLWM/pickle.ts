@@ -1,3 +1,4 @@
+import type { Agent } from "node:http";
 import type { ManagerOptions, Socket, SocketOptions } from "socket.io-client";
 import {
   buildConnectionHeaders,
@@ -14,6 +15,11 @@ import {
   type ClientOperationOptions,
   DEFAULT_CLIENT_CONNECTION_TIMEOUTS,
 } from "../lifecycle.js";
+import {
+  createProxyTransport,
+  type ProxyFetch,
+  type ProxyTransport,
+} from "../proxy.js";
 import type {
   LoginOptions,
   LoginResult,
@@ -53,6 +59,7 @@ export abstract class BaseAdapter {
   protected socket: Socket | null = null;
   loginMessage: string | null = null;
   loginStatus: "active" | "banned" = "active";
+  private proxyTransport: ProxyTransport | null = null;
 
   constructor(
     protected readonly connectionProfile: NormalizedConnectionProfile = resolveConnectionProfile(),
@@ -117,6 +124,10 @@ export abstract class BaseAdapter {
     if (this.connectionProfile.preset !== "node" || origin) {
       options.withCredentials = true;
     }
+    const agent = this.proxyAgent();
+    // engine.io-client types `agent` as string | boolean, but in Node it hands
+    // the value to xmlhttprequest-ssl and ws, which both take an http.Agent.
+    if (agent) options.agent = agent as unknown as string;
 
     return options;
   }
@@ -124,13 +135,38 @@ export abstract class BaseAdapter {
   protected webSocketOptions(defaultUrlOrOrigin: string): {
     headers?: Record<string, string>;
     origin?: string;
+    agent?: Agent;
   } {
     const headers = this.connectionHeaders(defaultUrlOrOrigin);
     const origin = this.connectionOrigin(defaultUrlOrOrigin);
+    const agent = this.proxyAgent();
     return {
       ...(Object.keys(headers).length > 0 ? { headers } : {}),
       ...(origin ? { origin } : {}),
+      ...(agent ? { agent } : {}),
     };
+  }
+
+  /** HTTP requests go through the configured proxy when one is set. */
+  protected readonly fetch: ProxyFetch = (input, init) =>
+    this.proxy()?.fetch(input, init) ?? globalThis.fetch(input, init);
+
+  protected proxyAgent(): Agent | undefined {
+    return this.proxy()?.agent;
+  }
+
+  /** Releases the proxy connections; the next connection builds new ones. */
+  async closeProxy(): Promise<void> {
+    const transport = this.proxyTransport;
+    this.proxyTransport = null;
+    await transport?.close().catch(() => {});
+  }
+
+  private proxy(): ProxyTransport | null {
+    const proxy = this.connectionProfile.proxy;
+    if (!proxy) return null;
+    this.proxyTransport ??= createProxyTransport(proxy);
+    return this.proxyTransport;
   }
 
   protected connectionHeaders(

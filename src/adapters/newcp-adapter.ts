@@ -835,7 +835,7 @@ export class NewcpAdapter extends BaseAdapter {
   }
 
   private async loadWorlds(signal?: AbortSignal): Promise<void> {
-    const resp = await fetch(CRUMBS_URL, {
+    const resp = await this.fetch(CRUMBS_URL, {
       headers: this.connectionHeaders(CRUMBS_URL),
       signal,
     });

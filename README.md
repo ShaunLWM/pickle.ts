@@ -70,7 +70,14 @@ const profiledClient = new Client("CPJourney", {
     referer: "https://play.cpjourney.net/"
   }
 })
+
+// route every connection (login, socket.io, websockets, fetch) through a proxy
+const proxiedClient = new Client("CPJourney", {
+  connectionProfile: { proxy: "http://user:pass@proxy.example:8080" }
+})
 ```
+
+`proxy` accepts `http://`, `https://`, `socks5://` and `socks5h://` URLs. An invalid URL throws `ProxyConfigError` from the constructor, and a dead proxy fails the connection instead of falling back to a direct one. One session opens several connections (polling, then the websocket upgrade), so use a proxy with a stable exit IP per client rather than a per-connection rotating gateway.
 
 ### `client.login(options, operationOptions?)`
 

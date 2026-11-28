@@ -3,6 +3,8 @@ import {
   resolveConnectionProfile,
 } from "../connection-profile.js";
 import type { BaseAdapter } from "./base-adapter.js";
+import { CpdimensionsAdapter } from "./cpdimensions-adapter.js";
+import { CpinfiniteAdapter } from "./cpinfinite-adapter.js";
 import { CpjourneyAdapter } from "./cpjourney-adapter.js";
 import { CplegacyAdapter } from "./cplegacy-adapter.js";
 import { CppslolAdapter } from "./cpps-lol-adapter.js";
@@ -13,6 +15,8 @@ import { PenguinoriginsAdapter } from "./penguinorigins-adapter.js";
 const ADAPTERS = {
   CPPSlol: CppslolAdapter,
   CPJourney: CpjourneyAdapter,
+  CPDimensions: CpdimensionsAdapter,
+  CPInfinite: CpinfiniteAdapter,
   CPLegacy: CplegacyAdapter,
   CPZero: CpzeroAdapter,
   NewCP: NewcpAdapter,

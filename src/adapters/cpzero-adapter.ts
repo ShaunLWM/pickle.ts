@@ -83,31 +83,62 @@ function parseWorldPopulations(raw: string): { id: number; population: number }[
     });
 }
 
+export type ServersXmlEntry = { name: string; address?: string; port?: number };
+
 /**
- * Fetch server ID → name mapping from servers.xml.
+ * The subset of the `ws` WebSocket API the Houdini adapters use, so a subclass can
+ * swap in another NUL-framed transport (see TcpFrameSocket).
+ */
+export type GameSocket = {
+  readonly readyState: number;
+  send(data: string): void;
+  close(): void;
+  on(event: "open", listener: () => void): unknown;
+  on(event: "message", listener: (data: Buffer) => void): unknown;
+  on(event: "error", listener: (error: Error) => void): unknown;
+  on(event: "close", listener: (code: number, reason: Buffer) => void): unknown;
+  removeAllListeners(event?: string): unknown;
+};
+
+/** Bounds the servers.xml request, which runs before the login and connect timers start. */
+export const SERVERS_XML_TIMEOUT_MS = 10_000;
+
+/** servers.xml body, or "" when the request fails, times out or is not 2xx. */
+export async function fetchServersXmlText(fetch: ProxyFetch, url: string): Promise<string> {
+  try {
+    const resp = await fetch(url, { signal: AbortSignal.timeout(SERVERS_XML_TIMEOUT_MS) });
+    return resp.ok ? await resp.text() : "";
+  } catch {
+    return "";
+  }
+}
+
+/**
+ * Fetch server ID → { name, port } mapping from servers.xml.
  * When `locale` is set, only returns servers under that `<language>` block.
  */
-async function fetchServerNames(
+export async function fetchServersXml(
   fetch: ProxyFetch,
+  url: string,
   locale?: string,
-): Promise<Map<number, string>> {
-  const map = new Map<number, string>();
-  try {
-    const resp = await fetch(SERVERS_XML_URL);
-    if (!resp.ok) return map;
-    const xml = await resp.text();
-    const safeLocale = locale && /^[a-z]{2,5}$/i.test(locale) ? locale : undefined;
-    const source = safeLocale
-      ? xml.match(new RegExp(`<language\\s+locale="${safeLocale}">([\\s\\S]*?)</language>`))?.[1] ?? ""
-      : xml;
-    for (const m of source.matchAll(/<server\s([^>]+)>/g)) {
-      const attrs = m[1];
-      const id = attrs.match(/id="(\d+)"/)?.[1];
-      const name = attrs.match(/name="([^"]+)"/)?.[1];
-      if (id && name) map.set(Number(id), name);
-    }
-  } catch {
-    // Non-fatal — unknown IDs fall back to "Server {id}"
+): Promise<Map<number, ServersXmlEntry>> {
+  return parseServersXml(await fetchServersXmlText(fetch, url), locale);
+}
+
+/** Server ID → { name, address, port } from a servers.xml body; empty when it has none. */
+export function parseServersXml(xml: string, locale?: string): Map<number, ServersXmlEntry> {
+  const map = new Map<number, ServersXmlEntry>();
+  const safeLocale = locale && /^[a-z]{2,5}$/i.test(locale) ? locale : undefined;
+  const source = safeLocale
+    ? xml.match(new RegExp(`<language\\s+locale="${safeLocale}">([\\s\\S]*?)</language>`))?.[1] ?? ""
+    : xml;
+  for (const m of source.matchAll(/<server\s([^>]+)>/g)) {
+    const attrs = m[1];
+    const id = attrs.match(/id="(\d+)"/)?.[1];
+    const name = attrs.match(/name="([^"]+)"/)?.[1];
+    const address = attrs.match(/address="([^"]+)"/)?.[1];
+    const port = attrs.match(/port="(\d+)"/)?.[1];
+    if (id && name) map.set(Number(id), { name, address, port: port ? Number(port) : undefined });
   }
   return map;
 }
@@ -123,6 +154,23 @@ function buildSfsLogin(username: string, loginHash: string, zone: string): strin
 /** Build an XT send packet: %xt%s%{handler}%{roomId}%{args}%\0 */
 function buildXtSend(handler: string, roomId: string, ...args: (string | number)[]): string {
   return `%xt%s%${handler}%${roomId}%${args.join("%")}%\0`;
+}
+
+const XML_ENTITIES: Readonly<Record<string, string>> = {
+  amp: "&",
+  lt: "<",
+  gt: ">",
+  quot: '"',
+  apos: "'",
+};
+
+/**
+ * The `rndK` key from a SmartFox response, XML-unescaped. Keys containing `&`
+ * arrive as `&amp;` and must be hashed in their decoded form.
+ */
+function parseRandomKey(raw: string): string | undefined {
+  const key = raw.match(/<k>([^<]+)<\/k>/)?.[1];
+  return key?.replace(/&(amp|lt|gt|quot|apos);/g, (_, name: string) => XML_ENTITIES[name]);
 }
 
 const HOUDINI_STATIC_KEY = 'Y(02.>\'H}t":E1';
@@ -152,8 +200,12 @@ function hashPassword(password: string, randomKey: string): string {
 }
 
 export class CpzeroAdapter extends BaseAdapter {
-  readonly id = "CPZero";
-  private ws: WebSocket | null = null;
+  readonly id: string = "CPZero";
+  protected readonly loginUrl: string = LOGIN_URL;
+  protected readonly serversXmlUrl: string = SERVERS_XML_URL;
+  /** Language sent in `j#js`. */
+  protected readonly joinLanguage: string = "en";
+  private ws: GameSocket | null = null;
   private loginKey = "";
   private confirmationHash = "";
   private rawLoginData = "";
@@ -170,7 +222,7 @@ export class CpzeroAdapter extends BaseAdapter {
         category: "unsupported_operation",
         phase: "transport_connecting",
         retryable: false,
-        message: "CPZero does not support token login",
+        message: `${this.id} does not support token login`,
       });
     }
 
@@ -183,6 +235,7 @@ export class CpzeroAdapter extends BaseAdapter {
       worlds: { id: number; population: number }[];
     };
 
+    const loginUrl = await this.resolveLoginUrl();
     const raw = await new Promise<RawLoginData>((resolve, reject) => {
       let settled = false;
       let randomKey = "";
@@ -198,9 +251,7 @@ export class CpzeroAdapter extends BaseAdapter {
         );
       }, operationOptions?.timeoutMs ?? DEFAULT_CLIENT_CONNECTION_TIMEOUTS.loginMs);
 
-      const ws = new WebSocket(LOGIN_URL, {
-        ...this.webSocketOptions(LOGIN_URL),
-      });
+      const ws = this.createSocket(loginUrl);
 
       const cleanup = (): void => {
         clearTimeout(timeout);
@@ -238,9 +289,9 @@ export class CpzeroAdapter extends BaseAdapter {
           }
 
           if (raw.includes('action="rndK"')) {
-            const match = raw.match(/<k>([^<]+)<\/k>/);
-            if (match) {
-              randomKey = match[1];
+            const key = parseRandomKey(raw);
+            if (key) {
+              randomKey = key;
               const loginHash = hashPassword(options.password, randomKey);
               ws.send(buildSfsLogin(options.username, loginHash, LOGIN_ZONE));
             }
@@ -356,12 +407,12 @@ export class CpzeroAdapter extends BaseAdapter {
 
     // Resolve world IDs to names via servers.xml, optionally filtered by locale
     const language = "token" in options ? undefined : options.language;
-    const nameMap = await fetchServerNames(this.fetch, language);
+    const nameMap = await this.loadServers(language);
     const filtered = language
       ? raw.worlds.filter((w) => nameMap.has(w.id))
       : raw.worlds;
     const servers: ServerInfo[] = filtered.map((w) => ({
-      name: nameMap.get(w.id) ?? `Server ${w.id}`,
+      name: nameMap.get(w.id)?.name ?? `Server ${w.id}`,
       // Houdini bar levels (0-7); min 1 so listed servers always show at least 1 bar
       population: Math.max(1, w.population),
     }));
@@ -375,19 +426,56 @@ export class CpzeroAdapter extends BaseAdapter {
     };
   }
 
+  /** World ID → servers.xml entry, optionally limited to one locale. Empty when unreachable. */
+  protected async loadServers(locale?: string): Promise<Map<number, ServersXmlEntry>> {
+    return fetchServersXml(this.fetch, this.serversXmlUrl, locale);
+  }
+
+  /** Opens the NUL-framed connection used for both login and game servers. */
+  protected createSocket(url: string): GameSocket {
+    return new WebSocket(url, this.webSocketOptions(url));
+  }
+
+  /** Login server URL; subclasses may look it up instead of using `loginUrl`. */
+  protected async resolveLoginUrl(): Promise<string> {
+    return this.loginUrl;
+  }
+
+  /**
+   * Finds a world in servers.xml by display name (case-insensitive). An empty list
+   * means servers.xml was unreachable, which is retryable; an unknown name is not.
+   */
+  protected async findServer(serverName: string): Promise<ServersXmlEntry> {
+    const servers = await this.loadServers();
+    const wanted = serverName.trim().toLowerCase();
+    const entry = [...servers.values()].find((s) => s.name.toLowerCase() === wanted);
+    if (entry) return entry;
+    const listUnavailable = servers.size === 0;
+    throw new ClientOperationError({
+      category: "transport_error",
+      phase: "transport_connecting",
+      retryable: listUnavailable,
+      message: listUnavailable
+        ? `${this.id}: server list unavailable`
+        : `${this.id}: unknown server "${serverName}"`,
+    });
+  }
+
+  /** Map a display server name to its game WebSocket URL. */
+  protected async resolveGameUrl(serverName: string): Promise<string> {
+    return `${GAME_URL_PREFIX}${serverName.toLowerCase().replace(/\s+/g, "_")}`;
+  }
+
   async connect(
     serverName: string,
     loginResult: LoginResult,
     options?: ConnectOptions,
   ): Promise<Socket> {
     this.reportLifecycle(options, "transport_connecting");
-    const serverSlug = serverName.toLowerCase().replace(/\s+/g, "_");
-    const url = `${GAME_URL_PREFIX}${serverSlug}`;
+    const url = await this.resolveGameUrl(serverName);
     const timeouts = this.connectionTimeouts(options);
 
-    const ws = new WebSocket(url, {
-      ...this.webSocketOptions(url),
-    });
+    const ws = this.createSocket(url);
     this.ws = ws;
 
     await new Promise<void>((resolve, reject) => {
@@ -467,9 +555,9 @@ export class CpzeroAdapter extends BaseAdapter {
           }
 
           if (raw.includes('action="rndK"')) {
-            const match = raw.match(/<k>([^<]+)<\/k>/);
-            if (match) {
-              randomKey = match[1];
+            const key = parseRandomKey(raw);
+            if (key) {
+              randomKey = key;
               activePhase = "authenticating";
               this.reportLifecycle(options, "authenticating");
               startTimer(
@@ -498,7 +586,7 @@ export class CpzeroAdapter extends BaseAdapter {
             case "l": {
               // Game auth success - send join server with penguin ID and login key
               this.reportLifecycle(options, "joining_session");
-              ws.send(`%xt%s%j#js%-1%${this.playerId}%${this.loginKey}%en%\0`);
+              ws.send(`%xt%s%j#js%-1%${this.playerId}%${this.loginKey}%${this.joinLanguage}%\0`);
               // Don't resolve yet - wait for js (join server response)
               break;
             }

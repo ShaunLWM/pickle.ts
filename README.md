@@ -2,7 +2,7 @@
 
 Type-safe client library for Club Penguin Private Servers.
 
-Built with TypeScript, Socket.IO, and msgpack. Supports CPJourney, CPLegacy, CPPS.lol, NewCP, and PenguinOrigins through an adapter pattern.
+Built with TypeScript, Socket.IO, and msgpack. Supports CPDimensions, CPInfinite, CPJourney, CPLegacy, CPPS.lol, CPZero, NewCP, and PenguinOrigins through an adapter pattern.
 
 ## Install
 
@@ -44,7 +44,7 @@ Creates a new client instance.
 
 | Param | Type | Description |
 |---|---|---|
-| `server` | `"CPJourney" \| "CPLegacy" \| "CPPSlol" \| "NewCP" \| "PenguinOrigins"` | CPPS server identifier (strongly typed) |
+| `server` | `"CPDimensions" \| "CPInfinite" \| "CPJourney" \| "CPLegacy" \| "CPPSlol" \| "CPZero" \| "NewCP" \| "PenguinOrigins"` | CPPS server identifier (strongly typed) |
 | `options.debug` | `boolean \| LogFn` | Enable debug logging. Pass `true` for console.log, or a custom function |
 | `options.connectionProfile` | `"chrome" \| "node" \| ConnectionProfile` | Controls HTTP/WebSocket headers. Defaults to browser-like Chrome headers; use `"node"` to preserve Node defaults |
 

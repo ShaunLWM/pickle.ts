@@ -9,7 +9,7 @@ export type LoginOptions = {
   username: string;
   password: string;
   secret?: string;
-  /** Filter returned servers by locale (e.g. "en", "es", "fr", "pt"). CPZero only. */
+  /** Filter returned servers by locale (e.g. "en", "es", "fr", "pt"). CPZero, CPInfinite and CPDimensions only. */
   language?: string;
 };
 
